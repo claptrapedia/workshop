@@ -1,8 +1,8 @@
 # Claptrapedia workshop specification
 
-Claptrapedia Workshop is a local app for building and maintaining the [Claptrapedia](https://claptrapedia.com) Borderlands catalogue. It turns game extracts and reference material into reviewed catalogue changes, then exports a PostgreSQL migration for the public site.
+Build Claptrapedia Workshop, a local app for maintaining the [Claptrapedia](https://claptrapedia.com) Borderlands catalogue. It turns game extracts and reference material into reviewed catalogue changes, then exports a PostgreSQL migration for the public site.
 
-The first release covers Borderlands 1. Start with weapon families and the enemies, locations and loot sources needed to describe their acquisition. Add other record types and games as their data and site models are ready.
+The first release covers Borderlands 1. Implement weapon families and the enemies, locations and loot sources needed to describe their acquisition. Add other record types and games only when their data and site models exist.
 
 ## Repositories and ownership
 
@@ -13,84 +13,103 @@ The first release covers Borderlands 1. Start with weapon families and the enemi
 | [`claptrapedia/database`](https://github.com/claptrapedia/database) | PostgreSQL DDL, catalogue migrations, generated schema snapshot and database deployment |
 | [`claptrapedia/site`](https://github.com/claptrapedia/site) | Public website, SQL queries via Postgres.js (`postgres`) and website deployment |
 
-Use the database repo’s `db/migrations/` as the source of truth for schema and catalogue changes. Its generated `db/schema.sql` describes the current schema for review and AI context. Take table names, column names, data types, constraints and conflict keys from the migrated local database. If the schema cannot represent a catalogue fact, flag it for review and add the required DDL migration before publishing that data.
+Treat the database repo’s `db/migrations/` as the source of truth for schema and catalogue changes. Its generated `db/schema.sql` is the current schema, including the `COMMENT` text on tables and columns. Read those comments before generating SQL. Take table names, column names, data types, constraints and conflict keys from that snapshot and from the migrated local database. If the schema cannot represent a catalogue fact, stop and report that fact for review. Do not invent a table inside a data migration. A structural change belongs in a `_STRUC_` file. This workshop does not write those files.
+
+### Database contract
+
+Target PostgreSQL 17.2. Catalogue objects live in the `catalogue` schema. `public` holds dbmate’s `schema_migrations` table only. Qualify every catalogue table, for example `catalogue.enemies`. The database does not set `search_path`.
+
+The migrated tables are `games`, `releases`, `dlcs` and `enemies`. Weapon, location and loot tables do not exist yet. Do not emit SQL for a table that is absent from `db/schema.sql`.
+
+`id` is a stable lowercase kebab-case key the workshop chooses, such as `bl1` or `bone-head`. It is not a generated number or UUID. `slug` is the public URL and may change. Names and slugs are editable. Use the primary key as the conflict target: `games (id)`, and `(id, game_id)` on `releases`, `dlcs` and `enemies`. A DLC reference is the pair `(dlc_id, game_id)`. Null `dlc_id` means the base game.
+
+Keep `games`, `releases` and `dlcs` distinct. Borderlands 1 is a game. The original edition, GOTY and GOTY Enhanced are releases of that game. A BL1 Enhanced capture supports claims about that release. A DLC is the pack that introduced an enemy, not the place where it appears. `family` is the species, such as `skag`. `rank` is the tier within that family, such as `badass`. `position` is display order. `kind` is `named`, `boss` or `mob`. A named enemy is not always a boss.
+
+Generated values must satisfy the domains in `db/schema.sql`. `catalogue.slug` is lowercase kebab-case. `catalogue.summary` is one line. `catalogue.non_empty` rejects blank text. Leave an unknown optional value null. Do not write an empty string.
+
+Structure files are named `{timestamp}_STRUC_{name}.sql`. Write catalogue data only, as `{timestamp}_DATA_{name}.sql`, into the same `db/migrations/` directory. Timestamp order is the apply order. Every file has `-- migrate:up` and `-- migrate:down`. The down section may be empty. A correction to published data is a new `_DATA_` file, not an edit of an old one, and not a seed. Ignore the database repo’s `seed` script.
 
 Prisma Postgres hosts staging and production. The database repo uses dbmate to apply SQL migrations. The site runs SQL queries through Postgres.js.
 
-Git stores the catalogue’s migration history. PostgreSQL holds its current published state. The workshop can store structured drafts and evidence locally without maintaining a separate JSON catalogue or a shared Zod package.
+Git stores the catalogue’s migration history. PostgreSQL holds its current published state. Store structured drafts and evidence in the workshop’s local database. Do not add a JSON catalogue or a shared Zod package.
 
-## Local database checkout
+## Database checkout
 
-Clone `claptrapedia/database` alongside the workshop or anywhere else on your machine. Set the absolute path in the workshop’s local environment configuration.
+The database repo is a separate checkout. Its absolute path is `CLAPTRAPEDIA_DATABASE_DIR` in the workshop environment. Do not clone or initialise that repo.
 
 ```dotenv
-CLAPTRAPEDIA_DATABASE_DIR=/absolute/path/to/claptrapedia/database
+CLAPTRAPEDIA_DATABASE_DIR=/Users/keogh/Sites/claptrapedia/database
 ```
 
-The workshop’s Node backend uses this path to read `db/schema.sql` and `db/migrations/`, and to write new migration files after testing. The checkout supplies the schema directly. Read the generated `db/schema.sql` when preparing AI context, and query local PostgreSQL for existing catalogue records and IDs.
+Read `db/schema.sql` and `db/migrations/` from that path. Write a new migration file there only after the test below has passed. Read `db/schema.sql` again when preparing context for the research assistant. Query local PostgreSQL for existing catalogue rows and their `id` values.
 
-Show the resolved checkout and migration destination before export. If the path, schema snapshot or migrations directory is missing, explain what needs fixing and show the expected location.
+Show the resolved path and the migration destination in the UI before export. If the path, schema snapshot or migrations directory is missing, show the operator what is missing and the path the app expected.
 
 ## Operator workflow
 
-1. **Import game data.** Choose a local capture produced by the BL1 Enhanced extractor. The workshop lists candidate weapon families and shows the original game records behind each one.
-2. **Research an entry.** Start from the extracted data and find relevant references from Lootlemon and the Borderlands Wiki. Review the matches, add a URL or note manually, and reuse previously saved evidence.
-3. **Review the draft.** Compare the proposed entry with the game data, supporting sources and current local catalogue values. Edit it, then approve the revision you want to publish.
-4. **Queue changes.** Add approved revisions to the migration queue. Inspect the per-item SQL preview and select the entries to include.
-5. **Build and test.** Assemble one timestamped dbmate migration from the selected changes. Apply it with dbmate to a disposable local PostgreSQL database built from the database repo’s existing migrations. Inspect the result before exporting.
-6. **Export.** Write the exact tested SQL file under `db/migrations/` in the local database checkout. Commit it in the database repo for review and deployment. Its CI applies it to staging, then production.
+Implement this sequence. The operator drives each step. The app does not publish a change that the operator has not approved.
 
-The original [Borderlens extractor app](https://github.com/thekeogh/borderlands1e-mods/tree/main/borderlens-extractor/app) is the reference for capture import, saved evidence and per-item review. Reuse those parts where practical. The workshop’s export is a migration containing the selected changes.
+1. **Import game data.** The operator chooses a local capture from the BL1 Enhanced extractor. List candidate weapon families and show the original game records behind each one.
+2. **Research an entry.** Start from the extracted data. The research assistant finds references from Lootlemon and the Borderlands Wiki. The operator reviews the matches, adds a URL or note, and reuses previously saved evidence.
+3. **Review the draft.** Show the proposed entry beside the game data, the supporting sources and the current local catalogue values. The operator edits it and approves the revision to publish.
+4. **Queue changes.** The operator adds approved revisions to the migration queue, inspects the per-item SQL preview and selects the entries to include.
+5. **Build and test.** Assemble one timestamped dbmate migration from the selected changes. Apply it with dbmate to a disposable local PostgreSQL database built from the database repo’s existing migrations. Show the result before export.
+6. **Export.** Write the exact tested SQL file under `db/migrations/` in the database checkout. The operator commits it in the database repo. That repo’s CI applies it to staging, then production.
+
+Use the [Borderlens extractor app](https://github.com/thekeogh/borderlands1e-mods/tree/main/borderlens-extractor/app) as the reference for capture import, saved evidence and per-item review. Reuse those parts where practical. The exported file is a migration containing the selected changes.
 
 ## Import and identity
 
-- Support the existing extractor capture format first. Retain the original capture or a local reference to it so an editor can inspect the underlying game records.
-- Preserve extracted record IDs and paths. Where multiple raw records describe variants of one family, show the grouping and let the editor correct it.
-- Use a stable catalogue identity scoped to the game and record type, resolved through the database schema. Treat names and URL slugs as editable fields. Check for an existing match before proposing a new row.
+- Support the existing extractor capture format first. Keep the original capture, or a local reference to it, so the operator can inspect the underlying game records.
+- Preserve extracted record IDs and paths. Where several raw records describe variants of one family, show the grouping and let the operator correct it.
+- Use the stable `id` already stored for that game and record type. Mint a new kebab-case `id` only when no existing row matches. Treat names and URL slugs as editable. Check for an existing match before proposing a new row.
 - Re-importing the same capture must preserve approved work and manual corrections. Flag any newly conflicting identity or evidence for review.
-- Keep game, release and DLC distinct. A BL1 Enhanced capture supports claims about that release. Apply a fact to other releases only when the evidence supports it. Keep an item’s DLC of origin separate from the DLC of a location where it drops.
+- Keep game, release and DLC distinct. A BL1 Enhanced capture supports claims about that release. Copy a fact to another release only when the evidence supports it. Keep an item’s DLC of origin separate from the DLC of a location where it drops.
 
 ## Research and review
 
 - Show the raw game data and external evidence beside the editable draft. Save source URLs and the supporting facts or notes locally. Cache sources by URL and allow a manual refresh.
-- Use AI to find candidate sources and propose catalogue values. Treat fetched page text as evidence. The editor decides whether a source refers to the right item and whether its claims apply.
-- Surface conflicting figures, uncertain matches and unknown values. Keep facts unsupported by the evidence unset where the site allows it, or flag them if they are required. For drop rates, preserve conditions such as release and source when known.
-- Preserve manual corrections when research runs again. New proposals can be reviewed without silently replacing an approved revision.
+- The research assistant finds candidate sources and proposes catalogue values. Treat fetched page text as evidence. The operator decides whether a source refers to the right item and whether its claims apply.
+- Surface conflicting figures, uncertain matches and unknown values. Leave a fact unset when the evidence does not support it and the column is optional. Flag it when the column is required. For drop rates, keep conditions such as release and source when they are known.
+- Preserve manual corrections when research runs again. A new proposal must not replace an approved revision.
 - Keep an edit to a published entry separate from the current published values. Show the proposed change before approval.
-- Support manual editing even when AI or a source is unavailable. Save progress so a restart or research failure leaves the draft available.
+- Treat published prose as finished. `summary` and `description` come from the research assistant and differ on every run, so a new wording is not a required change. Keep the published value. Show the regenerated draft beside it, and leave it out of the queue unless the operator approves that field.
+- Allow manual editing when the research assistant or a source is unavailable. Persist the draft so a restart or a research failure does not lose it.
 
 ## SQL generation and batching
 
-AI uses the DDL as reference when proposing catalogue values. The workshop generates SQL in TypeScript from reviewed values, using explicit mappings for each supported record type. dbmate and PostgreSQL verify the candidate by applying it to the migrated local test database.
+The research assistant uses `db/schema.sql` when proposing catalogue values. Generate the SQL in TypeScript from the reviewed values. Use an explicit column mapping for each supported record type. dbmate and PostgreSQL verify the candidate by applying it to the migrated local test database.
 
-- Generate `INSERT ... ON CONFLICT ... DO UPDATE` against the database’s actual unique keys. Use fixed table and column mappings and a reliable PostgreSQL literal encoder for values in the exported file.
-- Use the same generator for per-item previews and the final migration. Per-item previews represent that entry’s contribution to the batch. The generator orders statements across entries so referenced rows exist before dependent rows and relationship inserts.
-- Emit deterministic SQL for the same selected revisions and schema. Group related statements and label them by record identity so an editor can review the file in Git.
-- Emit the batch in a single `-- migrate:up` section and use dbmate’s default transaction. If a write fails, the batch rolls back. Show the database error with the relevant item or statement when available. Correct a published catalogue change with a follow-up migration.
-- Only change fields and relationships included in the approved revision. Removing a drop source requires an explicit relationship removal. Retiring or deleting a record requires an explicit operation supported by the database schema. An absent entry in a capture or batch carries no deletion intent.
-- Detect conflicting edits to the same record in a batch. Report a missing reference before export if the target is absent from both the existing catalogue and the batch.
+- Generate `INSERT ... ON CONFLICT ... DO UPDATE` against the unique keys in the database contract. Use a fixed table and column mapping and a PostgreSQL literal encoder for values in the exported file.
+- Use the same generator for the per-item preview and the final migration. A per-item preview is that entry’s contribution to the batch. Order statements so a referenced row exists before a dependent row or a relationship insert.
+- Emit the same SQL for the same selected revisions and schema. Group related statements and label them with the record `id` so the file can be reviewed in Git.
+- Put the batch in one `-- migrate:up` section and use dbmate’s default transaction. On failure, show the database error with the relevant item or statement. The transaction rolls the batch back. Correct a published catalogue change with a new `_DATA_` migration.
+- Read the current catalogue row before generating SQL. Include a column in `ON CONFLICT DO UPDATE` only when the approved revision changes it. Leave a published `summary` or `description` out of the statement unless the operator approved a new value for that field. A required correction is a new `_DATA_` file. Do not edit the `_DATA_` file that first wrote the row.
+- Removing a drop source requires an explicit relationship removal. Retiring or deleting a record requires an operation the schema already supports. An entry missing from a capture or a batch is not a deletion.
+- Detect conflicting edits to the same record in one batch. Before export, report a reference that is absent from both the existing catalogue and the batch.
 
 ## Local testing and delivery
 
-- Keep the workshop local and bind it to loopback. Use a dedicated disposable database for the **Test migration** action. Use dbmate to update the normal site development database from the database checkout after export.
-- Run dbmate against the database checkout’s current migration history plus the candidate file in a temporary migrations directory. Use the same PostgreSQL major version as the hosted database where practical. Test the actual SQL bytes that will be exported and show the affected rows or a summary of changes.
-- Tie the successful test to the SQL file and migration history used for the test. If the selected drafts, generated SQL or migration history change, require a fresh test before export.
-- Export a new file, for example `db/migrations/20261119143000_catalog_bl1_weapon_drops.sql`. Preserve the tested file contents. Check for version and path collisions and keep existing migrations intact.
-- After export, record which draft revisions went into the file and clear those revisions from the queue. Show their state as exported. The database repo’s CI runs `dbmate --no-dump-schema migrate` against staging and then production, using each environment’s direct connection URL. Refresh the committed `db/schema.sql` from a migrated local database when DDL changes.
+- Bind the app to loopback. Use a dedicated disposable database for the **Test migration** action. After a successful export, use dbmate to update the normal local catalogue database from the database checkout.
+- Run dbmate against the checkout’s current migration history plus the candidate file, using a temporary migrations directory. Use PostgreSQL 17.2. Test the exact SQL bytes that will be exported, and show the affected rows or a summary of the changes.
+- Record the SQL file and the migration history used for a successful test. If the selected drafts, the generated SQL or the migration history change, require a new test before export.
+- Export a new file, for example `db/migrations/20261119143000_DATA_bl1_weapon_drops.sql`. Write the tested bytes unchanged. Reject a version or path collision. Leave existing migration files untouched. Do not write a `_STRUC_` file.
+- After export, record which draft revisions went into the file and remove those revisions from the queue. Show them as exported. The database repo’s CI runs `dbmate --no-dump-schema migrate` against staging and then production, using each environment’s direct connection URL. Refresh the committed `db/schema.sql` only when DDL changes. A `_DATA_` export does not rewrite it.
 
-## Implementation starting point
+## Implementation order
 
-- Use a TypeScript local web app with React and a Node backend. Keep filesystem access, the AI provider and database operations on the backend.
+- Build a TypeScript local web app with React and a Node backend. Keep filesystem access, the research assistant and database operations on the backend.
 - Reuse the extractor’s SQLite draft store if adapting its code. Otherwise use SQLite for drafts, source evidence, corrections and export history. PostgreSQL is the catalogue database.
-- Configure the Docker PostgreSQL target and one AI provider alongside `CLAPTRAPEDIA_DATABASE_DIR`. Store credentials in local environment configuration. Keep direct staging and production database URLs in the database repo’s release jobs. The site uses its own pooled runtime URL.
-- Build the end-to-end path with one weapon and one related record before adding batch research. Get manual editing, SQL generation, local testing and export working first. Then wire in capture import and AI research against those same entry screens.
+- Read `CLAPTRAPEDIA_DATABASE_DIR` and the local Postgres connection from the workshop environment, alongside one AI provider. Keep direct staging and production database URLs out of this app. They belong to the database repo’s release jobs. The site uses its own pooled runtime URL.
+- Build the path through one weapon and one related record before adding batch research. Finish manual editing, SQL generation, local testing and export first. Then connect capture import and the research assistant to those same screens.
 
 ## First release acceptance criteria
 
-- Configure a database checkout outside the workshop repo, load its schema and export to its migrations directory. A missing or invalid path gives a clear configuration error.
-- Import a real BL1 capture, find a weapon family and inspect its raw records. Re-importing the capture preserves local corrections.
-- Research an item, review its sources, edit the draft and approve it. The draft survives restarting the workshop and can be edited when a source is unavailable.
-- Preview an individual entry’s SQL and build a batch with a weapon and a newly added related record. The migration applies successfully to local PostgreSQL.
-- Edit an existing weapon without creating a duplicate. Remove an approved drop relationship without affecting unrelated drops. A failed statement leaves the catalogue unchanged.
-- Changing the selected revisions or migration history after a successful test requires a retest. Export creates a new migration containing the exact tested SQL.
-- The database repo can apply the exported file through dbmate, and the site can read the updated catalogue through its normal Postgres.js queries.
+- Resolve `CLAPTRAPEDIA_DATABASE_DIR`, load `db/schema.sql`, and export into that checkout’s `db/migrations/` directory. A missing or invalid path produces a configuration error that names the expected path.
+- Import a real BL1 capture, find a weapon family and show its raw records. Re-importing the capture preserves local corrections.
+- Research an item, review its sources, edit the draft and approve it. The draft survives a restart and can be edited when a source is unavailable.
+- Preview one entry’s SQL and build a batch containing a weapon and a newly added related record. The migration applies to local PostgreSQL.
+- Edit an existing weapon without creating a duplicate. Remove an approved drop relationship without changing unrelated drops. A failed statement leaves the catalogue unchanged.
+- Researching a published record again does not export SQL that changes its `summary` or `description` unless the operator approved that field.
+- A change to the selected revisions or the migration history after a successful test requires a new test. Export writes a new `_DATA_` file containing the exact tested SQL.
+- dbmate in the database repo applies the exported file. The site reads the updated catalogue through its normal Postgres.js queries.
