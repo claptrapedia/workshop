@@ -27,7 +27,7 @@ Keep `games`, `releases` and `dlcs` distinct. Borderlands 1 is a game. The origi
 
 Generated values must satisfy the domains in `db/schema.sql`. `catalogue.slug` is lowercase kebab-case. `catalogue.summary` is one line. `catalogue.non_empty` rejects blank text. Leave an unknown optional value null. Do not write an empty string.
 
-Structure files are named `{timestamp}_STRUC_{name}.sql`. Write catalogue data only, as `{timestamp}_DATA_{name}.sql`, into the same `db/migrations/` directory. Timestamp order is the apply order. Every file has `-- migrate:up` and `-- migrate:down`. The down section may be empty. A correction to published data is a new `_DATA_` file, not an edit of an old one, and not a seed. Ignore the database repo’s `seed` script.
+Structure files are named `{timestamp}_STRUC_{name}.sql`. Write catalogue data only, as `{timestamp}_DATA_{name}.sql`, into the same `db/migrations/` directory. Timestamp order is the apply order. Every file has `-- migrate:up` and `-- migrate:down`. The down section may be empty. A correction to published data is a new `_DATA_` file, not an edit of an old one. There is no seed step.
 
 Prisma Postgres hosts staging and production. The database repo uses dbmate to apply SQL migrations. The site runs SQL queries through Postgres.js.
 
