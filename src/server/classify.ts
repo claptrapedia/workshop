@@ -121,12 +121,31 @@ export function classify(input: {
     return { groupKind: 'mission', itemType: null, subtype: null, characterId: null }
   }
 
+  const player = playerFromPath(path)
+  if (player && kind === 'PlayerClassDefinition') {
+    return { groupKind: 'character', itemType: null, subtype: null, characterId: player.id }
+  }
+
   return {
     groupKind: input.category || 'unknown',
     itemType: null,
     subtype: null,
     characterId: null,
   }
+}
+
+const PLAYER_NAMES: Record<string, string> = {
+  roland: 'Roland',
+  lilith: 'Lilith',
+  mordecai: 'Mordecai',
+  brick: 'Brick',
+}
+
+export function playerFromPath(path: string): { id: string; name: string } | null {
+  const match = /characterclass_(roland|lilith|mordecai|brick)$/i.exec(path)
+  const id = match?.[1]?.toLowerCase()
+  if (!id) return null
+  return { id, name: PLAYER_NAMES[id] ?? id }
 }
 
 export function familyLabel(pathOriginal: string, groupKind: string): string | null {

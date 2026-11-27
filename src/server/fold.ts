@@ -1,3 +1,4 @@
+import { applyCull } from './cull.ts'
 import { getDb } from './db.ts'
 
 const LEVEL =
@@ -172,6 +173,7 @@ export function applyFolds(): void {
   applyArtifactFold()
   applyIdentityFold()
   applyEnemyCleanup()
+  applyCull()
 }
 
 function enemyJobs(rows: Working[]): { keeper: Working; rest: Working[]; reason: (row: Working) => string }[] {

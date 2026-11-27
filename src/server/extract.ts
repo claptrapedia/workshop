@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { unzipSync } from 'fflate'
 
-import { classNameOf, classify, familyLabel } from './classify.ts'
+import { classNameOf, classify, familyLabel, playerFromPath } from './classify.ts'
 import { applyDedupe } from './dedupe.ts'
 import { applyFolds } from './fold.ts'
 import { closeDb, getDb, metaSet } from './db.ts'
@@ -320,7 +320,9 @@ function makeCandidate(key: string, identities: Identity[]): {
   if (!primary) throw new Error(`No identity for ${key}`)
   const id = chooseId(identities)
   const prefer = preferField(primary.className, asset?.className ?? loc?.className ?? '')
-  const name = displayName(loc ? [loc, ...identities] : identities, prefer)
+  const named = displayName(loc ? [loc, ...identities] : identities, prefer)
+  const player = playerFromPath(key)
+  const name = named || (player ? player.name : '')
   const pathOriginal = asset?.pathOriginal || loc?.pathOriginal || primary.pathOriginal || key
   const className = asset?.className || loc?.className || primary.className
   const category = asset?.category || loc?.category || primary.category || 'unknown'

@@ -25,7 +25,7 @@ export function Detail({
   id: string
   removed: boolean
   onChanged: () => void
-  onOpen: (id: string) => void
+  onOpen: (id: string, groupKey?: string) => void
 }) {
   const [detail, setDetail] = useState<CandidateDetail | null>(null)
   const [records, setRecords] = useState<RawRecord[] | null>(null)
@@ -125,8 +125,17 @@ export function Detail({
       <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', my: 1.5 }}>
         {detail.className && <Chip size="small" label={detail.className} />}
         <Chip size="small" label={detail.originLabel} />
+        {detail.named && <Chip size="small" label="Named" />}
         {detail.duplicateCount > 0 && (
-          <Chip size="small" color="warning" label={`Same name as ${detail.duplicateCount}`} />
+          <Chip
+            size="small"
+            color="warning"
+            label={
+              detail.duplicates.length === 1
+                ? `Also in ${detail.duplicates[0]?.groupLabel ?? 'another group'}`
+                : `Same name in ${detail.duplicates.length} other groups`
+            }
+          />
         )}
       </Box>
       <Typography variant="body2" color="text.secondary">
@@ -227,10 +236,18 @@ export function Detail({
 
       {detail.duplicates.length > 0 && (
         <Box sx={{ mt: 3 }}>
-          <Typography variant="subtitle2">Looks like the same name</Typography>
+          <Typography variant="subtitle2">Same display name, different file</Typography>
           {detail.duplicates.map((other) => (
-            <Button key={other.id} size="small" sx={{ display: 'block' }} onClick={() => onOpen(other.id)}>
-              {other.name || other.path}
+            <Button
+              key={other.id}
+              size="small"
+              sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left' }}
+              onClick={() => onOpen(other.id, other.groupKey)}
+            >
+              {other.groupLabel}
+              <Box component="span" sx={{ fontFamily: mono, fontSize: 11, color: 'text.secondary' }}>
+                {other.path}
+              </Box>
             </Button>
           ))}
         </Box>

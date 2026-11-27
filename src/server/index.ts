@@ -22,7 +22,7 @@ import {
   saveImage,
   summarize,
 } from './library.ts'
-import { imgDir, root } from './paths.ts'
+import { imgDir, root, stagingRoot } from './paths.ts'
 import { cancelSnapshot, confirmSnapshot, exportSnapshot, resetStore, stageSnapshot } from './snapshot.ts'
 
 if (process.versions.node !== '26.13.1') {
@@ -30,7 +30,12 @@ if (process.versions.node !== '26.13.1') {
   process.exit(1)
 }
 
-const upload = multer({ dest: path.join(root, '.staging'), limits: { fileSize: 200 * 1024 * 1024 } })
+const upload = multer({ dest: stagingRoot, limits: { fileSize: 200 * 1024 * 1024 } })
+
+function ensureStaging(_req: Request, _res: Response, next: NextFunction): void {
+  fs.mkdirSync(stagingRoot, { recursive: true })
+  next()
+}
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -59,7 +64,7 @@ async function main(): Promise<void> {
     res.json(status())
   })
 
-  app.post('/api/extract', upload.single('file'), (req, res) => {
+  app.post('/api/extract', ensureStaging, upload.single('file'), (req, res) => {
     const file = req.file
     if (!file) {
       res.status(400).json({ error: 'Choose a zip file.' })
@@ -185,7 +190,7 @@ async function main(): Promise<void> {
     }
   })
 
-  app.post('/api/snapshot/check', upload.single('file'), (req, res) => {
+  app.post('/api/snapshot/check', ensureStaging, upload.single('file'), (req, res) => {
     const file = req.file
     if (!file) {
       res.status(400).json({ error: 'Choose a snapshot zip.' })

@@ -322,6 +322,7 @@ function toRow(view: View, duplicateCount: number): CandidateRow {
     duplicateCount,
     removed: view.removed,
     dedupeReason: view.stored.dedupe_reason,
+    named: view.parentKey === 'enemy' && /\.named\./i.test(view.stored.path_original),
   }
 }
 
@@ -366,6 +367,8 @@ function duplicateIds(pool: View[], view: View): DuplicatePointer[] {
       id: other.stored.id,
       name: other.stored.name || other.stored.path_original,
       path: other.stored.path_original,
+      groupKey: other.groupKey,
+      groupLabel: other.childLabel ? `${groupLabel(other.parentKey)} · ${other.childLabel}` : groupLabel(other.parentKey),
     }))
 }
 

@@ -144,7 +144,8 @@ export function Library({ removed, onChanged }: { removed: boolean; onChanged: (
               <Typography variant="caption" color="text.secondary">
                 {row.originLabel}
               </Typography>
-              {row.duplicateCount > 0 && <Chip size="small" color="warning" label="Duplicate" />}
+              {row.named && <Chip size="small" label="Named" />}
+              {row.duplicateCount > 0 && <Chip size="small" color="warning" label="Same name" />}
             </Box>
           ))}
           {list.total > list.shown && (
@@ -164,7 +165,10 @@ export function Library({ removed, onChanged }: { removed: boolean; onChanged: (
           <Detail
             id={selected}
             removed={removed}
-            onOpen={setSelected}
+            onOpen={(next, groupKey) => {
+              setSelected(next)
+              if (groupKey) setGroup(groupKey)
+            }}
             onChanged={() => {
               setReload((value) => value + 1)
               onChanged()

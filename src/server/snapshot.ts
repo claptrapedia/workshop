@@ -92,6 +92,7 @@ export function resetStore(): void {
   pending.clear()
   fs.rmSync(dataDir, { recursive: true, force: true })
   fs.rmSync(stagingRoot, { recursive: true, force: true })
+  fs.mkdirSync(stagingRoot, { recursive: true })
   fs.rmSync(`${dataDir}-previous`, { recursive: true, force: true })
 }
 

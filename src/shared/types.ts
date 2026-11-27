@@ -46,6 +46,7 @@ export type CandidateRow = {
   duplicateCount: number
   removed: boolean
   dedupeReason: string | null
+  named: boolean
 }
 
 export type CandidateList = {
@@ -58,6 +59,8 @@ export type DuplicatePointer = {
   id: string
   name: string
   path: string
+  groupKey: string
+  groupLabel: string
 }
 
 export type CandidateDetail = CandidateRow & {
