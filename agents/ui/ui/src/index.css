@@ -1,0 +1,209 @@
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 33% 5%;
+    --foreground: 210 25% 94%;
+    --card: 220 27% 9%;
+    --card-foreground: 210 25% 94%;
+    --popover: 220 30% 8%;
+    --popover-foreground: 210 25% 94%;
+    --primary: 183 100% 50%;
+    --primary-foreground: 222 40% 6%;
+    --secondary: 219 22% 14%;
+    --secondary-foreground: 210 25% 94%;
+    --muted: 219 20% 13%;
+    --muted-foreground: 215 18% 68%;
+    --accent: 183 55% 15%;
+    --accent-foreground: 183 100% 88%;
+    --destructive: 340 100% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 219 20% 17%;
+    --input: 219 20% 20%;
+    --ring: 183 100% 50%;
+    --radius: 0.35rem;
+    --chart-1: 183 100% 50%;
+    --chart-2: 88 100% 50%;
+    --chart-3: 28 100% 60%;
+    --chart-4: 280 90% 65%;
+    --chart-5: 340 100% 60%;
+    --font-heading: "Archivo", ui-sans-serif, system-ui, sans-serif;
+    --font-body: "Archivo", ui-sans-serif, system-ui, sans-serif;
+    --font-display: "Archivo", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sidebar-background: 222 36% 4%;
+    --sidebar-foreground: 210 20% 84%;
+    --sidebar-primary: 183 100% 50%;
+    --sidebar-primary-foreground: 222 40% 6%;
+    --sidebar-accent: 219 24% 11%;
+    --sidebar-accent-foreground: 210 25% 96%;
+    --sidebar-border: 219 20% 14%;
+    --sidebar-ring: 183 100% 50%;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html {
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: var(--font-body);
+  }
+
+  ::selection {
+    background: rgba(0, 240, 255, 0.22);
+    color: #ffffff;
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 4px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1f2735;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #33405a;
+    background-clip: padding-box;
+  }
+}
+
+@layer utilities {
+  .kicker {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.3;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .mono {
+    font-family: var(--font-mono);
+  }
+
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Aurora: several low-opacity coloured glows over a fine grid. */
+  .grid-veil {
+    background-image:
+      radial-gradient(1100px 640px at 82% -12%, rgba(0, 240, 255, 0.12), transparent 62%),
+      radial-gradient(900px 560px at 4% -4%, rgba(168, 85, 247, 0.12), transparent 60%),
+      radial-gradient(760px 520px at 96% 78%, rgba(255, 61, 190, 0.09), transparent 62%),
+      radial-gradient(700px 480px at 34% 108%, rgba(165, 255, 0, 0.07), transparent 62%),
+      linear-gradient(to right, rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+    background-size: auto, auto, auto, auto, 56px 56px, 56px 56px;
+  }
+
+  .panel-sheen {
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 42%);
+  }
+
+  .ion-glow {
+    box-shadow: 0 0 0 1px rgba(0, 240, 255, 0.35), 0 0 28px -8px rgba(0, 240, 255, 0.55);
+  }
+
+  .rule-rainbow {
+    background-image: linear-gradient(
+      90deg,
+      #00f0ff 0%,
+      #a5ff00 22%,
+      #ffd400 40%,
+      #ff8a1f 58%,
+      #ff3dbe 76%,
+      #a855f7 92%,
+      #00f0ff 100%
+    );
+  }
+
+  .rule-scan {
+    background-image: repeating-linear-gradient(
+      90deg,
+      rgba(0, 240, 255, 0.5) 0 1px,
+      transparent 1px 6px
+    );
+  }
+
+  .code-line {
+    display: grid;
+    grid-template-columns: 2.6rem 1fr;
+    gap: 0.75rem;
+  }
+}
+
+/*
+  Type scale. The workshop was drawn at compact label sizes; these lift every
+  utility to a comfortable reading size without touching the layout.
+*/
+.text-\[8px\] {
+  font-size: 10px;
+}
+.text-\[9px\] {
+  font-size: 11px;
+}
+.text-\[10px\] {
+  font-size: 12px;
+}
+.text-\[10\.5px\] {
+  font-size: 12.5px;
+}
+.text-\[11px\] {
+  font-size: 13px;
+}
+.text-\[11\.5px\] {
+  font-size: 13.5px;
+}
+.text-\[12px\] {
+  font-size: 14px;
+}
+.text-\[12\.5px\] {
+  font-size: 14.5px;
+}
+.text-\[13px\] {
+  font-size: 15px;
+}
+.text-\[13\.5px\] {
+  font-size: 15px;
+}
+.text-\[15px\] {
+  font-size: 17px;
+}
+.text-\[17px\] {
+  font-size: 19px;
+}
+.text-\[18px\] {
+  font-size: 21px;
+}
+.text-\[22px\] {
+  font-size: 26px;
+}
+
+/* A luminous edge on every primary action. */
+button.bg-primary {
+  box-shadow: 0 0 0 1px rgba(0, 240, 255, 0.4), 0 10px 30px -14px rgba(0, 240, 255, 0.75),
+    0 0 42px -22px rgba(168, 85, 247, 0.9);
+}

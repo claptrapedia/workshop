@@ -2,7 +2,18 @@
 
 Build Claptrapedia Workshop, a local app for maintaining the [Claptrapedia](https://claptrapedia.com) Borderlands catalogue. It turns game extracts and reference material into reviewed catalogue changes, then exports a PostgreSQL migration for the public site.
 
-The first release covers Borderlands 1. The workshop reads one Borderlands 1 Enhanced extract, then uses LootLemon and the Borderlands Wiki to fill what that extract does not. Prove the path on one weapon and the enemies, locations and missions that source it, then use the same screens for the rest of the extract. A later game is another extract and another `game_id`. Do not build that game now. Keep `game_id` on every record and keep the review loop free of Borderlands 1-only assumptions where that is a small choice. Do not add a plugin system or a second game's slots to make the future easy.
+The first release covers Borderlands 1. The workshop is based on one uploaded Borderlands 1 Enhanced extract, then uses LootLemon and the Borderlands Wiki to fill what that extract does not. Prove the path on one weapon and the enemies, locations and missions that source it, then use the same screens for the rest of the extract. A later game is another extract and another `game_id`. Do not build that game now. Keep `game_id` on every record and keep the review loop free of Borderlands 1-only assumptions where that is a small choice. Do not add a plugin system or a second game's slots to make the future easy.
+
+## Build in chunks
+
+Build the app in the six chunks below, in order. Finish a chunk, stop, and let the operator run it. Do not start the next chunk in the same stretch of work. A chunk is one session of testing, not a single button and not the whole app.
+
+1. **Extract library.** The upload splash, the unzipped extract, the working set rendered with the raw records behind a candidate, delete, and snapshot export and import. No agent calls, no web capture, and no SQL.
+2. **Agents.** The header switch, and one action that sends a short prompt to the selected CLI and shows the reply and the model that ran. Claude Code and Codex both have to succeed. No catalogue prose yet.
+3. **One source.** The wiki parse proof and the LootLemon rendered proof. **Open**, **Fetch**, and the capture modal on those proofs. The progress bar covers that fetch.
+4. **One weapon draft.** Find the LootLemon and wiki pages for one weapon, capture them, and have the selected agent write the draft. The review screen shows the draft beside the raw records. The operator can edit and approve it. No migration file yet.
+5. **One migration.** SQL for that approved weapon, applied on `127.0.0.1:5433`, then written to the database checkout only if the apply succeeds. **Apply locally** is on screen and does nothing until the operator clicks it. Copy that weapon's card image when the file is written and the image exists.
+6. **Runs.** **Check for updates** on the sources that weapon stored. Then a run of one item, one subtype, one type, and everything, with the progress bar and **Refetch** off by default.
 
 ## Repositories and ownership
 
@@ -11,7 +22,7 @@ The first release covers Borderlands 1. The workshop reads one Borderlands 1 Enh
 | [`claptrapedia/extractions`](https://github.com/claptrapedia/extractions) | Raw game extractions used as workshop inputs |
 | [`claptrapedia/workshop`](https://github.com/claptrapedia/workshop) | Import, research, review, local drafts, SQL generation and testing |
 | [`claptrapedia/database`](https://github.com/claptrapedia/database) | PostgreSQL DDL, catalogue migrations, generated schema snapshot and database deployment |
-| [`claptrapedia/site`](https://github.com/claptrapedia/site) | Public website, SQL queries via Postgres.js (`postgres`) and website deployment |
+| [`claptrapedia/site`](https://github.com/claptrapedia/site) | Next.js site, SQL queries via Postgres.js (`postgres`) and website deployment |
 
 Treat the database repo’s `db/migrations/` as the source of truth for schema and catalogue changes. Its generated `db/schema.sql` is the current schema, including the `COMMENT` text on tables and columns. Read those comments before generating SQL. Take table names, column names, data types, constraints and conflict keys from that snapshot and from the migrated local database. If the schema cannot represent a catalogue fact, stop and report that fact for review. Do not invent a table inside a data migration. A structural change belongs in a `_STRUC_` file. This workshop does not write those files.
 
@@ -49,7 +60,12 @@ The database repo is a separate checkout. Its absolute path is `CLAPTRAPEDIA_DAT
 
 ```dotenv
 CLAPTRAPEDIA_DATABASE_DIR=/Users/keogh/Sites/claptrapedia/database
+CLAPTRAPEDIA_SITE_DIR=/Users/keogh/Sites/claptrapedia/site
+CLAPTRAPEDIA_DATABASE_URL=postgres://claptrapedia:claptrapedia@127.0.0.1:5432/claptrapedia
+CLAPTRAPEDIA_TEST_DATABASE_URL=postgres://claptrapedia:claptrapedia@127.0.0.1:5433/claptrapedia
 ```
+
+Postgres is Docker, from the database repo's `Dockerfile` (`FROM postgres:17.2`), built as `claptrapedia-postgres:17.2`. Do not use another Postgres image. The database repo's compose is the catalogue database: container `claptrapedia`, port `5432`, volume `pgdata`. Do not recreate that container and do not mount that volume from the workshop. The disposable test database is a second container from the same image, bound to `127.0.0.1:5433`, with its own volume. Start it for a test, apply the migrations there, and remove it when the test is finished.
 
 Read `db/schema.sql` and `db/migrations/` from that path. Write a new migration file there only after the test below has passed. Read `db/schema.sql` again when preparing context for the selected agent. Query local PostgreSQL for existing catalogue rows and their `id` values.
 
@@ -60,6 +76,8 @@ Show the resolved path and the migration destination in the UI before export. If
 The workshop UI is a local web app. Keep it quiet and fast to scan. One job on a screen, generous space, and no dashboard clutter.
 
 Use Material UI. The theme is dark. Colour belongs to the data: rarity, element, status, and the selected agent. Use many vibrant colours there. Leave the chrome dark.
+
+The look-and-feel reference is `/Users/keogh/Sites/claptrapedia/workshop/agents/ui`. That folder holds the screen shots and a Base44 export under `ui/`. Use them for colour, type, density and the dark feel. Ignore the content, the layout and the components. Do not copy them, and do not adopt that export's stack, auth or AI gateway. Design and implement this workshop's own components. The screens in this specification are what the app does.
 
 The header shows the game, which is Borderlands 1, and the primary agent. The operator switches the agent there. The choice is remembered. Claude Code is the default. Codex is the reserve.
 
@@ -76,31 +94,45 @@ Research, matching, and every sentence of catalogue prose are done by the select
 
 ## Game extract
 
-The base capture is the local directory:
+The workshop runs off one capture, `extract-20261110-124546-348467`. The operator uploads that capture as a `.zip`. The app does not read `/Users/keogh/Sites/claptrapedia/extractions/borderlands1e/extract-20261110-124546-348467` or the `.zip` beside it, and there is no `CLAPTRAPEDIA_EXTRACT_DIR`. Do not scrape the game again.
 
-```text
-/Users/keogh/Sites/claptrapedia/extractions/borderlands1e/extract-20261110-124546-348467
-```
+With an empty workshop store, the only screen is a splash that asks for that zip. No other screen, setting, or run is available until the upload has succeeded. The operator picks the file from their computer. The app unzips it into its own store. Reject a zip whose `manifest.json` is not this capture, and say what was wrong. The capture is extractor `0.3.2`, `format_version` 1, status `complete`, created on 2026-11-10. It is a Borderlands 1 Enhanced pull. `manifest.json` `catalogue.categories` counts the seeds: items, characters, missions, locations, skills, equipment parts, loot pools, and the other categories listed there. `catalogue_identity` records are crawl seeds, not deduplicated catalogue rows. `object`, `archetype_binding` and `world_binding` records are the raw game objects those seeds point at. Read the unzipped files and work out which fields make one item, one enemy, one location and one mission. Do not invent that rule before reading the files. Write the rule down once it is known, and keep the extract id and path on the draft so the operator can open the raw record. Do not write anything back into the extractions repo.
 
-`CLAPTRAPEDIA_EXTRACT_DIR` overrides that path when a newer capture replaces it. Read `manifest.json` and the `data/records-*.json` chunks. Do not scrape the game again.
-
-This capture is extractor `0.3.2`, `format_version` 1, status `complete`. It is a Borderlands 1 Enhanced pull. `manifest.json` `catalogue.categories` counts the seeds: items, characters, missions, locations, skills, equipment parts, loot pools, and the other categories listed there. `catalogue_identity` records are crawl seeds, not deduplicated catalogue rows. `object`, `archetype_binding` and `world_binding` records are the raw game objects those seeds point at. Group seeds into one catalogue entity. Keep the extract id and path on the draft so the operator can open the raw record.
+The working set is every candidate from that extract except the ones the operator has deleted. The extract contains duds and duplicates, including a seed filed as an item that is not an item. **Delete** removes that candidate from the workshop immediately: it leaves the list, and any draft or sources hanging off it go with it. Delete does not edit the unzipped extract, and it does not delete a published catalogue row. A published row is removed only by a migration. Uploading the same zip again keeps the deletions and the other manual corrections. A run walks the working set.
 
 Identity, names, parts, balances, and other facts present in the extract come from the extract. A website does not override an extracted fact unless the operator accepts that conflict. The extract does not contain the player-facing prose. The agent writes that. Card art is a file under `Workshop/src/data/img`. When the item is created, add an `item_images` row with `kind` `card` and the relative path. Do not invent a path for a file that is not there.
+
+## Settings
+
+Settings holds **Export snapshot** and **Import snapshot**. A snapshot is a zip of the workshop store: the unzipped extract, the working set, deletions, drafts, sources, captures, change signals, the queue, and export history. It is not the app source, not the card images, and not the catalogue database.
+
+**Export snapshot** downloads that zip immediately. There is no confirmation. **Import snapshot** asks before it does anything, because it replaces the whole store. On confirm, replace the store with the snapshot. On cancel, leave it. Reject a zip that is not a snapshot from this export, and say so. Import does not migrate PostgreSQL.
 
 ## External sources
 
 LootLemon and the Borderlands Wiki on Fandom are the external sources. Add another site only when it contributes a fact those two do not. Use the direct page for the entity. Do not invent a URL.
 
+Prove both sources before the first catalogue item, and keep the method that worked.
+
+- The wiki proof is the MediaWiki parse API for `Hellfire_(Borderlands)`. Save the revision id and one fact from the wikitext. A browser is not required. An HTML GET that returns 403 is not a failed source.
+- The LootLemon proof is `https://www.lootlemon.com/weapon/hellfire-bl1` read in a real browser. A plain HTTP GET of that URL is an empty shell and does not count. Save the part names or the card numbers the render actually contained.
+Finding a page and capturing it are separate steps. The extension is not used to find URLs.
+
+- The selected agent searches LootLemon and the wiki and adds the direct page for the entity. This is the same crawl the old workshop did without the extension. The operator rejects a URL that is the wrong page. Do not invent a URL.
+- Each saved URL has **Open** and **Fetch**. **Open** launches the page in the operator's browser. The operator uses the extension to send the useful part back. **Fetch** is the automatic capture. Playwright drives Chromium, waits until the article has rendered, and stores the loaded article text the way a whole-page capture would. Mark it automatic. The wiki fetch uses the MediaWiki parse API first. Playwright is for LootLemon and for any page the API does not cover. Cypress and Selenium are not used. Do not add a stealth plugin, a proxy, or a captcha solver. If the page shows a check the browser cannot pass, say so and leave **Open** as the way through. The source row shows that a capture exists, and whether it came from **Fetch** or the extension. It does not paste the capture into the list. Clicking that status opens a modal with the exact text that was stored. There is no confirm step and no editor. If the text is wrong, run **Fetch** or the extension again. That replaces the stored capture.
+- Copy the Chrome extension from `/Users/keogh/Sites/thekeogh/borderlands1e-mods/borderlens-extractor/app/chrome-extension` (Borderlens Page Capture 1.3.0) and adapt it. Do not write a new one. It is Manifest V3, loaded unpacked, and it only talks to `127.0.0.1` and `localhost`. The workshop page carries a meta tag the bridge recognises. The operator captures the whole loaded page, or holds Ctrl and drags up to 30 boxes. The extension sends the selected text and HTML back to the source that opened the tab. It does not send screenshots, cookies or anything the page has not rendered. Rename the Borderlens labels to this workshop. The capture is evidence. It is not prose.
+- A migration is built from the extract and from captures, whether the operator sent them or **Fetch** stored them. Do not build one from a URL that has no capture.
+- Do not depend on [obscura.sh](https://www.obscura.sh/). It is a remote browser with no API this build can call, and it drops the drag-to-select step. A CDP endpoint may be configured later. Playwright talks to it if it exists. The default remains the operator's browser and the extension.
+
 Each saved source stores its URL, the site, and a change signal:
 
 - The wiki signal is the MediaWiki revision id and timestamp from the parse API. Compare that before downloading the page. An unchanged revision is not a crawl.
 - LootLemon often has no revision timestamp. Store `ETag` and `Last-Modified` when the response sends them. Also store a hash of the normalised facts taken from the page: numbers, part names, drop names, and other catalogue values. Do not hash the HTML, and do not hash the prose this workshop wrote.
-- When the signal matches, stop. Do not download the body and do not call the agent.
-- When the signal is missing or different, download and extract the facts again. When the fact hash matches, update the stored signal and stop.
-- When the facts differ, the agent rewrites only the fields those facts affect, and a `description` that is still null. The app then builds, tests and writes a new `_DATA_` file for that change. It does not wait for approval. It does not commit or push. The operator commits the file in the database repo, as with any other export. A difference that is only wording never reaches this step.
+- When the signal matches, stop. Say that this source is unchanged. Do not download the body, do not call the agent, and do not replace prose. **Refetch** is the exception, and it is off by default.
+- When the signal is missing or different, mark that source as needing a new capture. **Fetch** or the extension supplies it. Do not write a migration from the bare page.
+- When the operator sends a new capture and its facts differ from the stored one, the agent rewrites only the fields those facts affect, and a `description` that is still null. The app then builds the migration, applies it on the disposable database at `127.0.0.1:5433`, and writes the `_DATA_` file only when that apply succeeds. It does not wait for approval. It does not apply the file to the catalogue database, and it does not commit or push. The operator commits the file in the database repo, as with any other export. A difference that is only wording never reaches this step.
 
-**Check for updates** is an operator action. It walks the saved URLs. Unchanged pages are skipped. A page whose facts changed produces the tested migration above. The run shows which pages were skipped, which facts changed, which model wrote the prose, and the migration file it wrote.
+**Check for updates** is an operator action. It walks the saved URLs. Unchanged pages are skipped. A changed page is marked for recapture. A recapture whose facts changed produces the tested migration above. The run shows which pages were skipped, which need a new capture, which facts changed, which model wrote the prose, and any migration file it wrote. With **Refetch** on, an unchanged signal is captured again. The fact check still decides whether prose or a migration changes.
 
 ## Prose
 
@@ -110,31 +142,47 @@ Do not paste source text into those fields. Do not generate them with a template
 
 A `quote`, an in-game `name`, a `card_line`, and a part modifier `line` are the words already printed on the card or the part list. Store those as printed. Rewriting them would make them wrong.
 
+## Runs
+
+A run walks items one at a time and drives the workflow below for each one. The operator picks the scope:
+
+- **Everything** sits at the top of the app: one large button and a large progress bar. It walks every item candidate in the extract.
+- **Type** walks one bucket, such as every weapon or every shield.
+- **Subtype** walks one subtype, such as every SMG or every MIRV. A candidate whose subtype is not known yet is in the type run only.
+- **Item** is a button on that item, such as the Hellfire. The run is that item alone.
+
+The same bar is used for every scope, including one item. It stays up for the whole run. It shows how many items are done, how many were skipped, and how many remain, and it names the current item and the current step. Any step that takes time reports on that bar: finding pages, fetching a source, writing prose, testing a migration, exporting. A step that is waiting on the agent says so. The bar does not paste page text. The capture modal still holds the stored text.
+
+A run is meant to be left. It continues through a skip, a page whose check cannot be passed, and a model name the CLI rejected. It stops only on a hard error: the database is down, the agent CLI is missing, or a write to disk failed. The bar then shows which item stopped and why. Items already finished stay finished. A first pass still waits for approval, so a run saves the draft and moves on. It does not approve the draft and it does not export that first migration. A later capture whose facts changed still writes its tested `_DATA_` file, then the run takes the next item.
+
+**Refetch** is a toggle on the run, off by default. While it is off, a source whose change signal is unchanged is skipped: the run says so, and it does not download, call the agent, or replace prose. While it is on, the run captures that source again as if it were new. A capture whose facts are unchanged still leaves the published sentence where it is, and it does not write a migration. The extension replacing a capture is the operator's selection, and it stores that selection either way.
+
 ## Operator workflow
 
-Implement this sequence for a record's first pass. The operator drives each step. The app does not write a migration for that first pass until the operator approves it. **Check for updates** is the exception: a later run that finds changed facts writes the tested migration itself.
+Implement this sequence for a record's first pass. The operator drives each step. A run drives it across the chosen items and can be left running. The app does not write a migration for that first pass until the operator approves it. **Check for updates** is the exception after a recapture: a later capture whose facts changed writes the tested migration itself. A changed page with no new capture does not.
 
-1. **Import game data.** Load the Borderlands 1 Enhanced extract named above. List candidate entities and show the original game records behind each one.
-2. **Research an entry.** Start from the extracted facts. The selected agent finds the LootLemon and wiki pages, reads them as evidence, and writes original prose. The operator reviews the matches, adds a URL or note, and reuses previously saved evidence. **Check for updates** later repeats the fetch only for pages whose facts changed, and writes the migration for those facts without another approval.
-3. **Review the draft.** Show the proposed entry beside the game data, the supporting sources and the current local catalogue values. The operator edits it and approves the revision to publish.
-4. **Queue changes.** The operator adds approved revisions to the migration queue, inspects the per-item SQL preview and selects the entries to include.
-5. **Build and test.** Assemble one timestamped dbmate migration from the selected changes. Apply it with dbmate to a disposable local PostgreSQL database built from the database repo’s existing migrations. Show the result before export.
-6. **Export.** Write the exact tested SQL file under `db/migrations/` in the database checkout. The operator commits it in the database repo. That repo’s CI applies it to staging, then production.
+1. **Load the extract.** The operator uploads the zip from the splash. List the working set and show the original game records behind each candidate. The operator deletes a dud or a duplicate.
+2. **Find the pages.** The selected agent adds the LootLemon and wiki URLs for the entity. No extension. The operator drops a URL that points at the wrong page.
+3. **Capture.** **Open** launches each saved URL for the extension. **Fetch** stores the rendered article with Playwright. The source row says the capture is there. A click opens a modal with the exact stored text. The agent writes the draft from the extract and those captures.
+4. **Review the draft.** Show the proposed entry beside the game data, the captures and the current local catalogue values. The operator edits the draft and approves the revision to publish. The capture itself is not edited.
+5. **Queue changes.** The operator adds approved revisions to the migration queue, inspects the per-item SQL preview and selects the entries to include.
+6. **Build and test.** Assemble one timestamped dbmate migration from the selected changes. Apply that exact SQL with dbmate to the disposable database on `127.0.0.1:5433`, on top of the database repo’s existing migrations. Show the result. A failed apply is shown with the database error and does not export.
+7. **Export.** Write the exact tested SQL file under `db/migrations/` in the database checkout. Writing the file does not migrate the catalogue database on port 5432, staging, or production. The operator migrates. **Apply locally** is a separate button that runs dbmate against port 5432 when the operator clicks it. Nothing clicks it for them. The operator commits the file in the database repo. That repo’s CI applies it to staging, then production.
 
 Use the [Borderlens extractor app](https://github.com/thekeogh/borderlands1e-mods/tree/main/borderlens-extractor/app) as the reference for capture import, saved evidence and per-item review. Reuse those parts where practical. The exported file is a migration containing the selected changes.
 
 ## Import and identity
 
-- Support the existing extractor capture format first. Keep the original capture, or a local reference to it, so the operator can inspect the underlying game records.
-- Preserve extracted record IDs and paths. Where several raw records describe variants of one family, show the grouping and let the operator correct it.
+- Support the existing extractor capture format first. Keep the unzipped capture in the workshop store so the operator can inspect the underlying game records.
+- Preserve extracted record IDs and paths. Where several raw records describe variants of one family, show the grouping and let the operator correct it. A duplicate candidate is deleted, not merged by guesswork.
 - Use the stable `id` already stored for that game and record type. Mint a new kebab-case `id` only when no existing row matches. Treat names and URL slugs as editable. Check for an existing match before proposing a new row.
-- Re-importing the same capture must preserve approved work and manual corrections. Flag any newly conflicting identity or evidence for review.
+- Uploading the same capture again must preserve approved work, deletions, and other manual corrections. Flag any newly conflicting identity or evidence for review. Importing a snapshot replaces the store with that snapshot.
 - Keep game, release and DLC distinct. A BL1 Enhanced capture supports claims about that release. Copy a fact to another release only when the evidence supports it. Keep an item’s DLC of origin separate from the DLC of a location where it drops.
 
 ## Research and review
 
 - Show the raw game data and external evidence beside the editable draft. Save source URLs and the supporting facts or notes locally. Cache sources by URL and allow a manual refresh.
-- The selected agent finds candidate sources and proposes catalogue values. Treat fetched page text as evidence. The operator decides whether a source refers to the right item and whether its claims apply. Page text is not copied into a prose field.
+- The selected agent finds the page URLs. The operator's capture is the evidence from that page. The agent proposes catalogue values from the extract and those captures. Page text is not copied into a prose field. A source with no capture is not ready.
 - Surface conflicting figures, uncertain matches and unknown values. Leave a fact unset when the evidence does not support it and the column is optional. Flag it when the column is required. A drop has no chance column. Record the source and leave a rate for the operator to review. Do not write a percent or a pool weight.
 - Preserve manual corrections when research runs again. A new proposal must not replace an approved revision.
 - Keep an edit to a published entry separate from the current published values. Show the proposed change before approval.
@@ -143,7 +191,7 @@ Use the [Borderlens extractor app](https://github.com/thekeogh/borderlands1e-mod
 
 ## SQL generation and batching
 
-The selected agent uses `db/schema.sql` when proposing catalogue values. Generate the SQL in TypeScript from the reviewed values. Use an explicit column mapping for each supported record type. dbmate and PostgreSQL verify the candidate by applying it to the migrated local test database.
+The selected agent uses `db/schema.sql` when proposing catalogue values. Generate the SQL in TypeScript from the reviewed values. Use an explicit column mapping for each supported record type. dbmate and PostgreSQL verify the candidate by applying the exact SQL to the disposable database on `127.0.0.1:5433`. Export is refused until that apply succeeds. The catalogue database on port 5432 is not part of the test.
 
 - Generate `INSERT ... ON CONFLICT ... DO UPDATE` against the unique keys in the database contract. Use a fixed table and column mapping and a PostgreSQL literal encoder for values in the exported file.
 - Use the same generator for the per-item preview and the final migration. A per-item preview is that entry’s contribution to the batch. Order statements so a referenced row exists before a dependent row or a relationship insert.
@@ -155,27 +203,32 @@ The selected agent uses `db/schema.sql` when proposing catalogue values. Generat
 
 ## Local testing and delivery
 
-- Bind the app to loopback. Use a dedicated disposable database for the **Test migration** action. After a successful export, use dbmate to update the normal local catalogue database from the database checkout.
+- Bind the app to loopback. **Test migration** applies the candidate only to the disposable database on `127.0.0.1:5433`. A successful export writes the file and does not migrate anything else. **Apply locally** runs dbmate against the catalogue database on port 5432, and only when the operator clicks it. Staging and production are never migrated from this app.
 - Run dbmate against the checkout’s current migration history plus the candidate file, using a temporary migrations directory. Use PostgreSQL 17.2. Test the exact SQL bytes that will be exported, and show the affected rows or a summary of the changes.
 - Record the SQL file and the migration history used for a successful test. If the selected drafts, the generated SQL or the migration history change, require a new test before export.
-- Export a new file, for example `db/migrations/20261119143000_DATA_bl1_weapon_drops.sql`. Write the tested bytes unchanged. Reject a version or path collision. Leave existing migration files untouched. Do not write a `_STRUC_` file.
+- Export a new file, for example `db/migrations/20261119143000_DATA_bl1_weapon_drops.sql`. Write the tested bytes unchanged. Reject a version or path collision. Leave existing migration files untouched. Do not write a `_STRUC_` file. Do not put image bytes in the database repo.
+- The workshop image folder is the working copy. The site is Next.js, and its static files live in `public/` at the repo root. On export, copy each `item_images.path` named in that migration from `Workshop/src/data/img` to `CLAPTRAPEDIA_SITE_DIR/public/img/<path>`. The database stores the path, such as `borderlands/weapons/hellfire.png`. Next.js serves that file at `/img/borderlands/weapons/hellfire.png`. Do not store the `/img/` prefix in the row. Do not put the file under `src`, and do not import it, or the URL will change. Copy only when the destination is missing or the bytes differ. Do not delete a site file because this batch did not mention it. Do not commit either repo.
 - After export, record which draft revisions went into the file and remove those revisions from the queue. Show them as exported. The database repo’s CI runs `dbmate --no-dump-schema migrate` against staging and then production, using each environment’s direct connection URL. Refresh the committed `db/schema.sql` only when DDL changes. A `_DATA_` export does not rewrite it.
 
 ## Implementation order
 
 - Build a TypeScript local web app with React, Material UI, and a Node backend. Keep filesystem access, the agent calls, and database operations on the backend.
 - Reuse the extractor’s SQLite draft store if adapting its code. Otherwise use SQLite for drafts, source evidence, change signals, corrections and export history. PostgreSQL is the catalogue database.
-- Read `CLAPTRAPEDIA_DATABASE_DIR`, `CLAPTRAPEDIA_EXTRACT_DIR`, and the local Postgres connection from the workshop environment. The agents are the local `claude` and `codex` CLIs. Keep direct staging and production database URLs out of this app. They belong to the database repo’s release jobs. The site uses its own pooled runtime URL.
-- Build the dark shell and the agent switch first. Then one weapon, from this extract through review, agent-written prose, SQL, test and export. Then **Check for updates** on the sources that weapon stored. The same path then covers the rest of the extract.
+- Read `CLAPTRAPEDIA_DATABASE_DIR`, `CLAPTRAPEDIA_SITE_DIR`, and the local Postgres connection from the workshop environment. The extract arrives as an uploaded zip. The agents are the local `claude` and `codex` CLIs. Keep direct staging and production database URLs out of this app. They belong to the database repo’s release jobs. The site uses its own pooled runtime URL.
+- Follow **Build in chunks**. Stop at the end of each chunk. `/Users/keogh/Sites/claptrapedia/workshop/agents/ui` is look and feel only. Start the test database from `claptrapedia-postgres:17.2` in the migration chunk, before the SQL is applied.
 
 ## First release acceptance criteria
 
 - Resolve `CLAPTRAPEDIA_DATABASE_DIR`, load `db/schema.sql`, and export into that checkout’s `db/migrations/` directory. A missing or invalid path produces a configuration error that names the expected path.
-- Import the named Borderlands 1 Enhanced extract, find a weapon and show its raw records. Re-importing the capture preserves local corrections.
+- The test database is `claptrapedia-postgres:17.2` on `127.0.0.1:5433`. It is not the catalogue container on port 5432.
+- An empty store shows only the upload splash. The app does not read the extractions checkout. After the zip is uploaded, the working set renders from the unzipped copy, with the raw records behind a candidate.
+- Delete removes a dud or a duplicate from the working set immediately. Uploading the same zip again does not bring it back. **Export snapshot** downloads a zip with no confirmation. **Import snapshot** replaces the store only after the operator confirms, and the deleted candidate is gone again.
+- A wiki proof and a LootLemon proof are saved before the first item is researched. The LootLemon proof came from a rendered page.
 - Research an item with the selected agent, review its sources, edit the draft and approve it. Prose in the draft was written by that agent. The draft survives a restart and can be edited when a source is unavailable.
 - The header switches the primary agent between Claude Code and Codex. Claude Code is the default.
-- **Check for updates** skips a saved page whose revision, validators or fact hash are unchanged, and it does not call the agent for that page. A changed fact is written into a tested `_DATA_` file with no further approval. Unchanged prose produces no file. The file is not committed.
-- Preview one entry’s SQL and build a batch containing a weapon and a newly added related record. The migration applies to local PostgreSQL.
+- **Check for updates** skips a saved page whose revision, validators or fact hash are unchanged, and it does not call the agent for that page. A changed page is marked for recapture. A recapture whose facts changed is written into a tested `_DATA_` file with no further approval. Unchanged prose produces no file. The file is not committed.
+- A run of one item, one subtype, one type, and everything walks its items one at a time. The progress bar names the current item and step. An unchanged source is skipped and the run says so. **Refetch** is off by default. With it on, that source is captured again, and unchanged facts still leave the prose in place. The run stops only on a hard error. A first pass stays a draft.
+- Preview one entry’s SQL and build a batch containing a weapon and a newly added related record. The migration applies on `127.0.0.1:5433` before export. Export writes the file and leaves port 5432, staging and production untouched. **Apply locally** is the only control that migrates port 5432, and it runs only when the operator clicks it.
 - Edit an existing weapon without creating a duplicate. Remove an approved drop relationship without changing unrelated drops. A failed statement leaves the catalogue unchanged.
 - Researching a published record again does not export SQL that changes its `summary` or `description` when the facts are unchanged.
 - A change to the selected revisions or the migration history after a successful test requires a new test. Export writes a new `_DATA_` file containing the exact tested SQL.
