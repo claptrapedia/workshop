@@ -18,6 +18,7 @@ const { getDb } = await import('./db.ts')
 const { dataDir, imgDir } = await import('./paths.ts')
 const { acceptsReset, confirmSnapshot, exportSnapshot, resetStore, stageSnapshot } = await import('./snapshot.ts')
 const { agentLaunch, askAgent, getAgent, setAgent } = await import('./agent.ts')
+const { captureText, fetchSource, listSources, lootlemonFact, wikiFact } = await import('./sources.ts')
 
 type Member = {
   id: string
@@ -345,6 +346,100 @@ test('a Codex reply records the model, and a Codex failure stays on Codex', asyn
     askAgent('codex', async () => JSON.stringify({ type: 'error', message: 'Codex refused the prompt.' })),
     /Codex refused the prompt/,
   )
+})
+
+const WIKITEXT = `{{infobox weapon
+|manufacturer = Maliwan
+|type   = Submachine Gun
+|element       = Incendiary
+|damage_low    = 20
+|damage_high   = 359
+}}`
+
+const RENDERED = `Support
+BORDERLANDS 1
+Hellfire
+Weapon Type
+SMG
+Manufacturer
+Maliwan
+Every shot creates an extra Fire Explosion that deals 60% Damage and has a 100% chance to ignite the enemy.
+Body_1
+Twisted
+Thumper
+Maliwan_1
+We value your privacy
+This farming guide is not part of the capture.
+`
+
+test('the source proof lists the two fixed Hellfire pages', () => {
+  const rows = listSources()
+  assert.deepEqual(
+    rows.map((row) => [row.id, row.site, row.url, row.fact]),
+    [
+      ['proof-wiki-hellfire', 'wiki', 'https://borderlands.fandom.com/wiki/Hellfire_(Borderlands)', null],
+      ['proof-lootlemon-hellfire', 'lootlemon', 'https://www.lootlemon.com/weapon/hellfire-bl1', null],
+    ],
+  )
+})
+
+test('a wiki fetch stores the parse, the revision, and one infobox fact', async () => {
+  assert.equal(wikiFact(WIKITEXT), 'Maliwan Incendiary Submachine Gun, damage 20–359')
+  assert.throws(() => wikiFact('no infobox'), /no weapon fact/)
+  const urls: string[] = []
+  const row = await fetchSource('proof-wiki-hellfire', {
+    wiki: async (url) => {
+      urls.push(url)
+      if (url.includes('action=parse')) return { parse: { wikitext: { '*': WIKITEXT } } }
+      return { query: { pages: { '1': { revisions: [{ revid: 541461, timestamp: '2026-01-06T03:09:57Z' }] } } } }
+    },
+  })
+  assert.ok(urls.every((url) => url.startsWith('https://borderlands.fandom.com/api.php?')))
+  assert.equal(row.fact, 'Maliwan Incendiary Submachine Gun, damage 20–359')
+  assert.equal(row.via, 'fetch')
+  assert.equal(row.signal?.revisionId, 541461)
+  assert.equal(row.signal?.revisedAt, '2026-01-06T03:09:57Z')
+  assert.match(captureText(row.id), /manufacturer = Maliwan/)
+
+  const failed = await fetchSource('proof-wiki-hellfire', {
+    wiki: async () => {
+      throw new Error('Wiki request failed (403).')
+    },
+  })
+  assert.match(failed.error ?? '', /403/)
+  assert.equal(failed.via, 'fetch')
+  assert.match(captureText(row.id), /manufacturer = Maliwan/)
+})
+
+test('a LootLemon fetch stores the rendered parts and ignores the page shell', async () => {
+  assert.equal(lootlemonFact(RENDERED), 'Maliwan SMG · Body_1, Twisted, Thumper, Maliwan_1 · fire explosion 60%')
+  assert.throws(() => lootlemonFact('<html></html>'), /no part names or card numbers/)
+  const row = await fetchSource('proof-lootlemon-hellfire', {
+    page: async (url) => {
+      assert.equal(url, 'https://www.lootlemon.com/weapon/hellfire-bl1')
+      return { text: RENDERED, etag: null, lastModified: 'Tue, 24 Nov 2026 09:25:51 GMT' }
+    },
+  })
+  assert.equal(row.fact, 'Maliwan SMG · Body_1, Twisted, Thumper, Maliwan_1 · fire explosion 60%')
+  assert.equal(row.signal?.lastModified, 'Tue, 24 Nov 2026 09:25:51 GMT')
+  assert.equal(row.signal?.factHash?.length, 64)
+  const stored = captureText(row.id)
+  assert.match(stored, /Body_1/)
+  assert.match(stored, /Twisted/)
+  assert.doesNotMatch(stored, /farming guide/)
+
+  const blocked = await fetchSource('proof-lootlemon-hellfire', {
+    page: async () => ({ text: 'Just a moment. Verify you are human.', etag: null, lastModified: null }),
+  })
+  assert.match(blocked.error ?? '', /Open is the way through/)
+  assert.match(captureText(row.id), /Body_1/)
+
+  const empty = await fetchSource('proof-lootlemon-hellfire', {
+    page: async () => ({ text: '<html></html>', etag: null, lastModified: null }),
+  })
+  assert.match(empty.error ?? '', /no Hellfire article/)
+  assert.match(captureText(row.id), /Body_1/)
+  await assert.rejects(fetchSource('missing'), /Unknown source/)
 })
 
 function flag(args: string[], name: string): string | undefined {

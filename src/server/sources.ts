@@ -44,11 +44,17 @@ export async function openSource(id: string): Promise<void> {
   })
 }
 
-export async function fetchSource(id: string): Promise<SourceProof> {
+export type SourceReaders = {
+  wiki?: (url: string) => Promise<unknown>
+  page?: (url: string) => Promise<{ text: string; etag: string | null; lastModified: string | null }>
+}
+
+export async function fetchSource(id: string, readers: SourceReaders = {}): Promise<SourceProof> {
   const proof = known(id)
   const current = readSource(id) ?? blank(proof)
   try {
-    const next = proof.site === 'wiki' ? await fetchWiki(proof) : await fetchLootlemon(proof)
+    const next =
+      proof.site === 'wiki' ? await fetchWiki(proof, readers.wiki ?? wikiJson) : await fetchLootlemon(proof, readers.page)
     writeSource(next)
     return next
   } catch (error) {
@@ -99,12 +105,15 @@ export function lootlemonFact(text: string): string {
   return bits.join(' · ')
 }
 
-async function fetchWiki(proof: (typeof PROOFS)[number]): Promise<SourceProof> {
+async function fetchWiki(
+  proof: (typeof PROOFS)[number],
+  read: (url: string) => Promise<unknown>,
+): Promise<SourceProof> {
   const page = proof.page ?? WIKI_PAGE
-  const parsed = await wikiJson(
+  const parsed = await read(
     `https://borderlands.fandom.com/api.php?action=parse&page=${encodeURIComponent(page)}&prop=wikitext&format=json`,
   )
-  const queried = await wikiJson(
+  const queried = await read(
     `https://borderlands.fandom.com/api.php?action=query&titles=${encodeURIComponent(page)}&prop=revisions&rvprop=ids|timestamp&format=json`,
   )
   const wikitext = wikitextOf(parsed)
@@ -123,7 +132,39 @@ async function fetchWiki(proof: (typeof PROOFS)[number]): Promise<SourceProof> {
   }
 }
 
-async function fetchLootlemon(proof: (typeof PROOFS)[number]): Promise<SourceProof> {
+async function fetchLootlemon(
+  proof: (typeof PROOFS)[number],
+  read?: (url: string) => Promise<{ text: string; etag: string | null; lastModified: string | null }>,
+): Promise<SourceProof> {
+  const loaded = read ? await read(proof.url) : await renderLootlemon(proof.url)
+  if (pageBlocked(loaded.text)) {
+    throw new Error('LootLemon showed a check the browser cannot pass. Open is the way through.')
+  }
+  const article = articleText(loaded.text)
+  if (!/hellfire/i.test(article)) throw new Error('The rendered page had no Hellfire article.')
+  const fact = lootlemonFact(article)
+  const { names, explosion } = lootlemonFacts(article)
+  const signal: SourceSignal = {
+    ...emptySignal(),
+    etag: loaded.etag,
+    lastModified: loaded.lastModified,
+    factHash: createHash('sha256')
+      .update([...names, explosion].filter((item): item is string => Boolean(item)).sort().join('\n'))
+      .digest('hex'),
+  }
+  saveCapture(proof.id, article)
+  saveSignal(proof.id, signal)
+  return {
+    ...blank(proof),
+    fact,
+    via: 'fetch',
+    capturedAt: new Date().toISOString(),
+    signal,
+    error: null,
+  }
+}
+
+async function renderLootlemon(url: string): Promise<{ text: string; etag: string | null; lastModified: string | null }> {
   const { chromium } = await import('playwright')
   const browser = await chromium.launch({ channel: 'chrome', headless: true }).catch((error: unknown) => {
     throw new Error(
@@ -132,7 +173,7 @@ async function fetchLootlemon(proof: (typeof PROOFS)[number]): Promise<SourcePro
   })
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1400 } })
-    const response = await page.goto(proof.url, { waitUntil: 'domcontentloaded', timeout: 45_000 })
+    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 })
     const accept = page.getByRole('button', { name: 'Accept all' })
     if (await accept.count()) await accept.click({ timeout: 5_000 }).catch(() => {})
     await page
@@ -144,32 +185,11 @@ async function fetchLootlemon(proof: (typeof PROOFS)[number]): Promise<SourcePro
       .getByText('Body_1', { exact: true })
       .waitFor({ timeout: 10_000 })
       .catch(() => {})
-    const text = await page.locator('body').innerText()
-    if (pageBlocked(text)) {
-      throw new Error('LootLemon showed a check the browser cannot pass. Open is the way through.')
-    }
-    const article = articleText(text)
-    if (!/hellfire/i.test(article)) throw new Error('The rendered page had no Hellfire article.')
-    const fact = lootlemonFact(article)
     const headers = response?.headers() ?? {}
-    const { names, explosion } = lootlemonFacts(article)
-    const signal: SourceSignal = {
-      ...emptySignal(),
+    return {
+      text: await page.locator('body').innerText(),
       etag: headers.etag ?? null,
       lastModified: headers['last-modified'] ?? null,
-      factHash: createHash('sha256')
-        .update([...names, explosion].filter((item): item is string => Boolean(item)).sort().join('\n'))
-        .digest('hex'),
-    }
-    saveCapture(proof.id, article)
-    saveSignal(proof.id, signal)
-    return {
-      ...blank(proof),
-      fact,
-      via: 'fetch',
-      capturedAt: new Date().toISOString(),
-      signal,
-      error: null,
     }
   } finally {
     await browser.close()
