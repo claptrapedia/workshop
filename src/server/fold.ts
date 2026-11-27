@@ -171,6 +171,7 @@ export function applyIdentityFold(): number {
 export function applyFolds(): void {
   applyArtifactFold()
   applyIdentityFold()
+  applyEnemyCleanup()
 }
 
 function enemyJobs(rows: Working[]): { keeper: Working; rest: Working[]; reason: (row: Working) => string }[] {
@@ -344,4 +345,172 @@ function pickNumbered(members: Working[]): Working {
     const bn = Number(/\d+$/.exec(stem(b.path))?.[0] ?? 0)
     return an - bn || stem(a.path).length - stem(b.path).length
   })[0] as Working
+}
+
+type EnemyRow = Working & { origin: string; family: string; objs: number }
+
+const ROLE_ALIAS: Record<string, string> = {
+  outlaw: 'bandit thug',
+  killer: 'bandit killer',
+  desperado: 'bandit raider',
+  'badass desperado': 'badass raider',
+  'wild alpha skag': 'alpha skag',
+}
+
+export function applyEnemyCleanup(): number {
+  const db = getDb()
+  const load = () =>
+    db
+      .prepare(
+        `SELECT c.id, c.name, c.name_key AS nameKey, c.class_name AS className, c.path,
+                c.group_kind AS groupKind, c.origin_hint AS origin, c.family_label AS family,
+                EXISTS (SELECT 1 FROM records r WHERE r.candidate_id = c.id AND r.record_type = 'object') AS objs
+         FROM candidates c
+         LEFT JOIN corrections cor ON cor.candidate_id = c.id
+         WHERE c.group_kind = 'enemy' AND IFNULL(cor.removed, 0) = 0`,
+      )
+      .all() as (EnemyRow & { objs: number })[]
+
+  const correction = db.prepare('SELECT removed FROM corrections WHERE candidate_id = ?')
+  const recordIds = db.prepare('SELECT record_id FROM records WHERE candidate_id = ?')
+  const records = db.prepare(
+    'SELECT record_type, record_id, file, body FROM records WHERE candidate_id = ? ORDER BY sort',
+  )
+  const nextSort = db.prepare('SELECT COALESCE(MAX(sort), -1) AS sort FROM records WHERE candidate_id = ?')
+  const insertRecord = db.prepare(
+    `INSERT INTO records (candidate_id, sort, record_type, record_id, file, body) VALUES (?, ?, ?, ?, ?, ?)`,
+  )
+  const remove = db.prepare(
+    `INSERT INTO corrections (candidate_id, removed, dedupe_reason) VALUES (?, 1, ?)
+     ON CONFLICT(candidate_id) DO NOTHING`,
+  )
+
+  const drop = (id: string, reason: string, keeperId?: string) => {
+    const prior = correction.get(id) as { removed: number } | undefined
+    if (prior && Number(prior.removed) === 0) return 0
+    const result = remove.run(id, reason)
+    const inserted = Number(result.changes) > 0
+    if (!inserted && !(prior && Number(prior.removed) === 1)) return 0
+    if (keeperId) {
+      const have = new Set((recordIds.all(keeperId) as { record_id: string }[]).map((record) => record.record_id))
+      let sort = Number((nextSort.get(keeperId) as { sort: number }).sort)
+      for (const record of records.all(id) as RecordRow[]) {
+        if (have.has(record.record_id)) continue
+        sort += 1
+        insertRecord.run(keeperId, sort, record.record_type, record.record_id, record.file, record.body)
+        have.add(record.record_id)
+      }
+    }
+    return inserted ? 1 : 0
+  }
+
+  let changed = 0
+  db.exec('BEGIN')
+  try {
+    for (const row of load()) {
+      const junk =
+        (row.family === 'Bandits' && Number(row.objs) === 0) ||
+        stem(row.path) === 'pawn_balance_delete' ||
+        stem(row.path).includes('delete')
+      if (!junk) continue
+      changed += drop(row.id, 'No game object. Unused name.')
+    }
+    const rows = load().map((row) => ({ ...row, objs: Number(row.objs) }))
+    const index = new Map<string, EnemyRow[]>()
+    for (const row of rows) {
+      if (!row.objs) continue
+      for (const token of enemyTokens(row.path)) {
+        const list = index.get(token) ?? []
+        list.push(row)
+        index.set(token, list)
+      }
+    }
+    for (const row of rows) {
+      const keeper = enemyKeeper(row, rows, index)
+      if (!keeper) continue
+      changed += drop(row.id, `Same enemy as ${keeper.name}. The copy sits on that row.`, keeper.id)
+    }
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+  if (changed) console.log(`Cleaned ${changed} enemy copies`)
+  return changed
+}
+
+function enemyKeeper(row: EnemyRow, rows: EnemyRow[], index: Map<string, EnemyRow[]>): EnemyRow | null {
+  const intro = /_00_intro|_intro|_allrange|_longrange|_medrange|_shortrange/
+  if (intro.test(row.path)) {
+    const plain = rows.filter((other) => other.nameKey === row.nameKey && other.id !== row.id && !intro.test(other.path))
+    const keeper = plain.sort((a, b) => enemyScore(a) - enemyScore(b))[0]
+    if (keeper && enemyScore(keeper) < enemyScore(row)) return keeper
+  }
+  const copy =
+    /(-trap|trap_|dfault|d-fault|dlc2_|dlc3_|dlc4_|_intro)/.test(row.path) ||
+    row.origin === 'dlc2' ||
+    row.origin === 'dlc3' ||
+    row.origin === 'dlc4'
+  if (/trap/i.test(row.name)) {
+    const stripped = stripTrap(row.name.trim().toLowerCase())
+    const named = rows.filter((other) => {
+      if (other.id === row.id) return false
+      const keeperName = other.name.trim().toLowerCase()
+      if (keeperName === stripped) return true
+      return stripped.startsWith(keeperName) && keeperName.length >= 12
+    })
+    const keeper = named.sort(
+      (a, b) => b.name.length - a.name.length || enemyScore(a) - enemyScore(b),
+    )[0]
+    if (keeper && enemyScore(keeper) < enemyScore(row)) return keeper
+  }
+  if (!copy) return null
+  const found: EnemyRow[] = []
+  for (const token of enemyTokens(row.path)) {
+    for (const other of index.get(token) ?? []) {
+      if (other.id !== row.id && sameEnemy(row, other) && enemyScore(other) < enemyScore(row)) found.push(other)
+    }
+  }
+  return found.sort((a, b) => enemyScore(a) - enemyScore(b))[0] ?? null
+}
+
+function enemyScore(row: EnemyRow): number {
+  const copy = /trap|dfault|d-fault|dlc/.test(row.path) ? 10 : 0
+  return (row.origin ? 100 : 0) + copy + row.path.length / 1000
+}
+
+function sameEnemy(copy: EnemyRow, keeper: EnemyRow): boolean {
+  const left = copy.name.trim().toLowerCase()
+  const right = keeper.name.trim().toLowerCase()
+  if (!left || !right) return false
+  if (left === right || stripTrap(left) === stripTrap(right)) return true
+  if (left.startsWith('d-fault ') && left !== 'd-fault') return true
+  return ROLE_ALIAS[left] === right
+}
+
+function stripTrap(name: string): string {
+  return name.replace(/[\s-]*trap/g, '').replace(/\s+/g, ' ').trim()
+}
+
+function enemyTokens(path: string): string[] {
+  let stem = path.split('.').pop()?.toLowerCase() ?? ''
+  stem = stem.replace('pawn_balanced_', 'pawn_balance_')
+  stem = stem.replace(/^dlc\d_/, '')
+  stem = stem.replace(/^(pawn_balance_|balance_)/, '')
+  let value = stem
+    .replace('alphaskag-trap_', 'alpha_')
+    .replace('skag-trap_', 'skag_')
+    .replace('-trap_', '_')
+    .replace('-trap', '')
+    .replace('trap_', '')
+  if (value !== 'd-fault') {
+    value = value.replace('midget-d-fault_', 'midget_').replace('-d-fault_', '_').replace('-dfault', '').replace('_dfault', '')
+  }
+  value = value.replace(/dlc\d_/g, '').replace(/_00_intro$/, '').replace(/_intro$/, '')
+  const found = new Set<string>([value, value.replaceAll('_', '')])
+  if (stem.endsWith('_dfault')) {
+    found.add(`${stem.slice(0, -7)}_basic`)
+    found.add(stem.slice(0, -7))
+  }
+  return [...found].filter((token) => token.length >= 4)
 }
