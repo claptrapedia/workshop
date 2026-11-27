@@ -86,6 +86,10 @@ export function cancelSnapshot(token: string): void {
   pending.delete(token)
 }
 
+export function acceptsReset(confirm: unknown): boolean {
+  return confirm === 'CONFIRM'
+}
+
 export function resetStore(): void {
   closeDb()
   for (const dir of pending.values()) fs.rmSync(dir, { recursive: true, force: true })

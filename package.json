@@ -6,7 +6,8 @@
     "node": "26.13.1"
   },
   "scripts": {
-    "dev": "node --experimental-strip-types src/server/index.ts"
+    "dev": "node --experimental-strip-types src/server/index.ts",
+    "test": "node --experimental-strip-types --test --test-concurrency=1 --test-reporter=./src/test-reporter.js src/server/rules.test.ts"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

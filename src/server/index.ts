@@ -6,6 +6,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import multer from 'multer'
 import { createServer as createViteServer } from 'vite'
 
+import { askAgent, getAgent, setAgent } from './agent.ts'
 import { metaGet } from './db.ts'
 import { applyDedupe } from './dedupe.ts'
 import { applyFolds } from './fold.ts'
@@ -23,7 +24,14 @@ import {
   summarize,
 } from './library.ts'
 import { imgDir, root, stagingRoot } from './paths.ts'
-import { cancelSnapshot, confirmSnapshot, exportSnapshot, resetStore, stageSnapshot } from './snapshot.ts'
+import {
+  acceptsReset,
+  cancelSnapshot,
+  confirmSnapshot,
+  exportSnapshot,
+  resetStore,
+  stageSnapshot,
+} from './snapshot.ts'
 
 if (process.versions.node !== '26.13.1') {
   console.error(`Workshop needs Node 26.13.1 (.nvmrc). This process is ${process.versions.node}.`)
@@ -62,6 +70,40 @@ async function main(): Promise<void> {
 
   app.get('/api/status', (_req, res) => {
     res.json(status())
+  })
+
+  app.get('/api/agent', (_req, res) => {
+    if (!storeIsReady()) {
+      res.status(400).json({ error: 'Upload an extract first.' })
+      return
+    }
+    res.json({ agent: getAgent() })
+  })
+
+  app.put('/api/agent', (req, res) => {
+    if (!storeIsReady()) {
+      res.status(400).json({ error: 'Upload an extract first.' })
+      return
+    }
+    try {
+      res.json({ agent: setAgent(req.body?.agent) })
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.post('/api/agent/ping', async (req, res) => {
+    if (!storeIsReady()) {
+      res.status(400).json({ error: 'Upload an extract first.' })
+      return
+    }
+    try {
+      const agent = setAgent(req.body?.agent ?? getAgent())
+      const result = await askAgent(agent)
+      res.json({ agent, model: result.model, reply: result.reply })
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
   })
 
   app.post('/api/extract', ensureStaging, upload.single('file'), (req, res) => {
@@ -220,7 +262,7 @@ async function main(): Promise<void> {
   })
 
   app.post('/api/reset', (req, res) => {
-    if (req.body?.confirm !== 'CONFIRM') {
+    if (!acceptsReset(req.body?.confirm)) {
       res.status(400).json({ error: 'Type CONFIRM to reset.' })
       return
     }

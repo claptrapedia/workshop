@@ -1,3 +1,11 @@
+export type AgentId = 'claude' | 'codex'
+
+export type AgentPing = {
+  agent: AgentId
+  model: string
+  reply: string
+}
+
 export type Summary = {
   candidates: number
   weapons: number
