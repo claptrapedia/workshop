@@ -26,22 +26,57 @@ export function listSources(): SourceProof[] {
 }
 
 export function captureText(id: string): string {
-  known(id)
   const row = getDb().prepare('SELECT body FROM captures WHERE id = ?').get(id) as { body: string } | undefined
-  if (!row) throw new Error('No capture stored.')
+  if (!row) {
+    if (!PROOFS.some((item) => item.id === id) && !id.startsWith('src-')) throw new Error('Unknown source.')
+    throw new Error('No capture stored.')
+  }
   const body = JSON.parse(row.body) as { text?: unknown }
   if (typeof body.text !== 'string' || !body.text.trim()) throw new Error('No capture stored.')
   return body.text
 }
 
-export async function openSource(id: string): Promise<void> {
-  const proof = known(id)
-  await new Promise<void>((resolve, reject) => {
-    execFile('open', [proof.url], (error) => {
+export function openUrl(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile('open', [url], (error) => {
       if (error) reject(new Error(error.message))
       else resolve()
     })
   })
+}
+
+export async function openSource(id: string): Promise<void> {
+  const proof = known(id)
+  await openUrl(proof.url)
+}
+
+export async function storePageCapture(
+  id: string,
+  site: SourceSite,
+  url: string,
+): Promise<{ fact: string; signal: SourceSignal }> {
+  if (site === 'wiki') {
+    const page = wikiPageName(url)
+    const parsed = await wikiJson(wikiParseUrl(page))
+    const queried = await wikiJson(wikiRevisionUrl(page))
+    const text = wikitextOf(parsed)
+    const revision = revisionOf(queried)
+    let fact = page.replaceAll('_', ' ')
+    try {
+      fact = wikiFact(text)
+    } catch {
+      fact = page.replaceAll('_', ' ')
+    }
+    const signal: SourceSignal = { ...emptySignal(), revisionId: revision.revid, revisedAt: revision.timestamp }
+    saveCapture(id, text)
+    saveSignal(id, signal)
+    return { fact, signal }
+  }
+  const loaded = await renderLootlemon(url)
+  const stored = lootlemonCapture(loaded)
+  saveCapture(id, stored.text)
+  saveSignal(id, stored.signal)
+  return { fact: stored.fact, signal: stored.signal }
 }
 
 export type SourceReaders = {
@@ -110,12 +145,8 @@ async function fetchWiki(
   read: (url: string) => Promise<unknown>,
 ): Promise<SourceProof> {
   const page = proof.page ?? WIKI_PAGE
-  const parsed = await read(
-    `https://borderlands.fandom.com/api.php?action=parse&page=${encodeURIComponent(page)}&prop=wikitext&format=json`,
-  )
-  const queried = await read(
-    `https://borderlands.fandom.com/api.php?action=query&titles=${encodeURIComponent(page)}&prop=revisions&rvprop=ids|timestamp&format=json`,
-  )
+  const parsed = await read(wikiParseUrl(page))
+  const queried = await read(wikiRevisionUrl(page))
   const wikitext = wikitextOf(parsed)
   const revision = revisionOf(queried)
   const fact = wikiFact(wikitext)
@@ -137,6 +168,24 @@ async function fetchLootlemon(
   read?: (url: string) => Promise<{ text: string; etag: string | null; lastModified: string | null }>,
 ): Promise<SourceProof> {
   const loaded = read ? await read(proof.url) : await renderLootlemon(proof.url)
+  const stored = lootlemonCapture(loaded)
+  saveCapture(proof.id, stored.text)
+  saveSignal(proof.id, stored.signal)
+  return {
+    ...blank(proof),
+    fact: stored.fact,
+    via: 'fetch',
+    capturedAt: new Date().toISOString(),
+    signal: stored.signal,
+    error: null,
+  }
+}
+
+function lootlemonCapture(loaded: { text: string; etag: string | null; lastModified: string | null }): {
+  text: string
+  fact: string
+  signal: SourceSignal
+} {
   if (pageBlocked(loaded.text)) {
     throw new Error('LootLemon showed a check the browser cannot pass. Open is the way through.')
   }
@@ -152,16 +201,21 @@ async function fetchLootlemon(
       .update([...names, explosion].filter((item): item is string => Boolean(item)).sort().join('\n'))
       .digest('hex'),
   }
-  saveCapture(proof.id, article)
-  saveSignal(proof.id, signal)
-  return {
-    ...blank(proof),
-    fact,
-    via: 'fetch',
-    capturedAt: new Date().toISOString(),
-    signal,
-    error: null,
-  }
+  return { text: article, fact, signal }
+}
+
+function wikiParseUrl(page: string): string {
+  return `https://borderlands.fandom.com/api.php?action=parse&page=${encodeURIComponent(page)}&prop=wikitext&format=json`
+}
+
+function wikiRevisionUrl(page: string): string {
+  return `https://borderlands.fandom.com/api.php?action=query&titles=${encodeURIComponent(page)}&prop=revisions&rvprop=ids|timestamp&format=json`
+}
+
+function wikiPageName(url: string): string {
+  const path = new URL(url).pathname.replace(/^\/wiki\//, '')
+  if (!path) throw new Error('That wiki URL has no page.')
+  return decodeURIComponent(path)
 }
 
 async function renderLootlemon(url: string): Promise<{ text: string; etag: string | null; lastModified: string | null }> {

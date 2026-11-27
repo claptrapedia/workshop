@@ -32,6 +32,21 @@ import {
   resetStore,
   stageSnapshot,
 } from './snapshot.ts'
+import {
+  addSource,
+  approveDraft,
+  fetchItemSource,
+  findPages,
+  openItemSource,
+  rejectSource,
+  removeShared,
+  researchView,
+  restoreSource,
+  saveDraft,
+  shareSource,
+  unapproveDraft,
+  writeDraft,
+} from './research.ts'
 import { captureText, fetchSource, listSources, openSource } from './sources.ts'
 
 if (process.versions.node !== '26.13.1') {
@@ -133,6 +148,115 @@ async function main(): Promise<void> {
     try {
       await openSource(req.params.id)
       res.json({ ok: true })
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.get('/api/research', (req, res) => {
+    if (!storeIsReady()) {
+      res.status(400).json({ error: 'Upload an extract first.' })
+      return
+    }
+    try {
+      res.json(researchView(String(req.query.id ?? '')))
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.post('/api/research/find', async (req, res) => {
+    try {
+      res.json(await findPages(String(req.body?.id ?? '')))
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.post('/api/research/source', (req, res) => {
+    try {
+      res.json(addSource(String(req.body?.id ?? ''), String(req.body?.url ?? '')))
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.post('/api/research/reject', (req, res) => {
+    try {
+      res.json(rejectSource(String(req.body?.sourceId ?? '')))
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.post('/api/research/restore', (req, res) => {
+    try {
+      res.json(restoreSource(String(req.body?.sourceId ?? '')))
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.post('/api/research/remove', (req, res) => {
+    try {
+      res.json(removeShared(String(req.body?.sourceId ?? '')))
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.post('/api/research/share', (req, res) => {
+    try {
+      res.json(shareSource(String(req.body?.sourceId ?? ''), req.body?.kind, req.body?.value))
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.post('/api/research/fetch', async (req, res) => {
+    try {
+      res.json(await fetchItemSource(String(req.body?.sourceId ?? '')))
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.post('/api/research/open', async (req, res) => {
+    try {
+      await openItemSource(String(req.body?.sourceId ?? ''))
+      res.json({ ok: true })
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.post('/api/research/draft', async (req, res) => {
+    try {
+      res.json(await writeDraft(String(req.body?.id ?? '')))
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.put('/api/research/draft', (req, res) => {
+    try {
+      res.json(saveDraft(String(req.body?.id ?? ''), req.body ?? {}))
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.post('/api/research/approve', (req, res) => {
+    try {
+      res.json(approveDraft(String(req.body?.id ?? '')))
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.post('/api/research/unapprove', (req, res) => {
+    try {
+      res.json(unapproveDraft(String(req.body?.id ?? '')))
     } catch (error) {
       res.status(400).json({ error: message(error) })
     }

@@ -160,7 +160,15 @@ export function Library({ removed, onChanged }: { removed: boolean; onChanged: (
           )}
         </Box>
       </Box>
-      <Box sx={{ width: 420, flexShrink: 0, borderLeft: 1, borderColor: 'divider', minHeight: 0 }}>
+      <Box
+        sx={{
+          width: /titlem_maliwan1_hellfire/i.test(list.rows.find((row) => row.id === selected)?.path ?? '') ? 860 : 420,
+          flexShrink: 0,
+          borderLeft: 1,
+          borderColor: 'divider',
+          minHeight: 0,
+        }}
+      >
         {selected ? (
           <Detail
             id={selected}

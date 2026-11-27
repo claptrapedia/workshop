@@ -12,6 +12,7 @@ import {
 import { useEffect, useState } from 'react'
 
 import { api } from './api.ts'
+import { Review } from './Review.tsx'
 import { mono } from './theme.ts'
 import type { CandidateDetail, RawRecord } from '../shared/types.ts'
 import { CHARACTERS, ITEM_TYPES } from '../shared/vocab.ts'
@@ -270,6 +271,10 @@ export function Detail({
         </Typography>
       )}
 
+      {/titlem_maliwan1_hellfire/i.test(detail.path) && <Review id={detail.candidateId} records={records} />}
+
+      {!/titlem_maliwan1_hellfire/i.test(detail.path) && (
+      <>
       <Typography variant="subtitle2" sx={{ mt: 3, mb: 1 }}>
         Raw records{records ? ` · ${records.length}` : ''}
       </Typography>
@@ -303,6 +308,8 @@ export function Detail({
           </Accordion>
         )
       })}
+      </>
+      )}
     </Box>
   )
 

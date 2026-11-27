@@ -10,6 +10,48 @@ export type SourceSignal = {
   factHash: string | null
 }
 
+export type SourceScope = {
+  kind: 'game' | 'item-type' | 'subtype' | 'manufacturer' | 'element'
+  value: string
+}
+
+export type ItemSource = {
+  id: string
+  candidateId: string | null
+  site: SourceSite
+  url: string
+  rejected: boolean
+  scope: SourceScope | null
+  fact: string | null
+  via: 'fetch' | null
+  capturedAt: string | null
+  signal: SourceSignal | null
+  error: string | null
+}
+
+export type WeaponDraft = {
+  candidateId: string
+  name: string
+  summary: string
+  description: string
+  manufacturer: string
+  element: string
+  rarity: string
+  damage: string
+  approved: boolean
+  model: string | null
+}
+
+export type ResearchView = {
+  candidateId: string
+  name: string
+  sources: ItemSource[]
+  shared: ItemSource[]
+  scopes: SourceScope[]
+  draft: WeaponDraft | null
+  canWrite: boolean
+}
+
 export type SourceProof = {
   id: string
   site: SourceSite

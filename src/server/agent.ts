@@ -74,6 +74,75 @@ export async function askAgent(agent: AgentId, execute: AgentRun = run): Promise
   }
 }
 
+export async function completeAgent(
+  agent: AgentId,
+  prompt: string,
+  purpose: 'search' | 'draft',
+): Promise<{ model: string; reply: string }> {
+  const model = agent === 'claude' ? CLAUDE_MODEL : CODEX_MODEL
+  const timeout = purpose === 'search' ? 180_000 : TIMEOUT_MS
+  const execute: AgentRun = (next, chosen) => {
+    const { command, args } = taskLaunch(next, chosen, prompt, purpose)
+    return spawnCli(command, args, timeout)
+  }
+  try {
+    return await call(agent, model, execute)
+  } catch (error) {
+    if (agent !== 'claude' || !modelRejected(error)) throw error
+    return call(agent, 'sonnet', execute)
+  }
+}
+
+function taskLaunch(
+  agent: AgentId,
+  model: string,
+  prompt: string,
+  purpose: 'search' | 'draft',
+): { command: string; args: string[] } {
+  if (agent === 'claude') {
+    const tools =
+      purpose === 'search'
+        ? ['--tools', 'WebSearch,WebFetch', '--allowedTools', 'WebSearch,WebFetch', '--permission-mode', 'dontAsk', '--permission-prompts', 'none']
+        : ['--tools=']
+    return {
+      command: 'claude',
+      args: [
+        '-p',
+        '--output-format',
+        'json',
+        '--model',
+        model,
+        '--effort',
+        'medium',
+        '--no-session-persistence',
+        '--disable-slash-commands',
+        '--setting-sources',
+        'user',
+        ...tools,
+        prompt,
+      ],
+    }
+  }
+  return {
+    command: 'codex',
+    args: [
+      'exec',
+      '--ephemeral',
+      '--skip-git-repo-check',
+      '--json',
+      '--color',
+      'never',
+      '-m',
+      model,
+      '-c',
+      'model_reasoning_effort="medium"',
+      '-s',
+      'read-only',
+      prompt,
+    ],
+  }
+}
+
 async function call(agent: AgentId, model: string, execute: AgentRun): Promise<{ model: string; reply: string }> {
   const stdout = await execute(agent, model)
   return agent === 'claude' ? claudeReply(stdout, model) : codexReply(stdout, model)
@@ -81,6 +150,10 @@ async function call(agent: AgentId, model: string, execute: AgentRun): Promise<{
 
 function run(agent: AgentId, model: string): Promise<string> {
   const { command, args } = agentLaunch(agent, model)
+  return spawnCli(command, args, TIMEOUT_MS)
+}
+
+function spawnCli(command: string, args: string[], timeout: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
@@ -88,8 +161,8 @@ function run(agent: AgentId, model: string): Promise<string> {
     let settled = false
     const timer = setTimeout(() => {
       child.kill('SIGTERM')
-      finish(new Error('The call timed out after 120 seconds.'))
-    }, TIMEOUT_MS)
+      finish(new Error(`The call timed out after ${Math.round(timeout / 1000)} seconds.`))
+    }, timeout)
     const finish = (error?: Error, value?: string) => {
       if (settled) return
       settled = true
