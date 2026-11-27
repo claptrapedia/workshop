@@ -6,9 +6,9 @@ The first release covers Borderlands 1. The workshop is based on one uploaded Bo
 
 ## Build in chunks
 
-Build the app in the six chunks below, in order. Finish a chunk, stop, and let the operator run it. Do not start the next chunk in the same stretch of work. A chunk is one session of testing, not a single button and not the whole app.
+Build the app in the six chunks below, in order. Finish a chunk, write tests for the behaviour that chunk claims, run them with `pnpm test`, then stop and let the operator run the app. Do not start the next chunk in the same stretch of work. A chunk is one session of testing, not a single button and not the whole app. The tests cover the store and the rules. They do not cover the look of the screens. If the operator changes a rule, update this specification and the tests together.
 
-1. **Extract library.** The upload splash, the unzipped extract, and the working set rendered with the raw records behind a candidate. The list is grouped and searchable, with delete, restore, duplicate suggestions, a type correction, and the card image. Snapshot export and import, including a snapshot that fails its check. No agent calls, no web capture, and no SQL.
+1. **Extract library.** The upload splash, the unzipped extract, and the working set rendered with the raw records behind a candidate. The list is grouped and searchable, with delete, restore, duplicate suggestions, a type correction, and the card image. Snapshot export and import, including a snapshot that fails its check. **Reset app** returns to the splash. No agent calls, no web capture, and no SQL.
 2. **Agents.** The header switch, and one action that sends a short prompt to the selected CLI and shows the reply and the model that ran. Claude Code and Codex both have to succeed. No catalogue prose yet.
 3. **One source.** The wiki parse proof and the LootLemon rendered proof. **Open**, **Fetch**, and the capture modal on those proofs. The progress bar covers that fetch.
 4. **One weapon draft.** **Find pages** for one weapon, and nothing else: the URLs are stored and a rejected URL stays rejected. Then capture those pages. A general page can be shared onto one scope with **Share with**, and the draft for that weapon includes the matching shared capture. The selected agent writes the draft. The review screen shows the draft beside the raw records. The operator can edit and approve it. No migration file yet.
@@ -113,6 +113,8 @@ Identity, names, parts, balances, and other facts present in the extract come fr
 Settings holds **Export snapshot** and **Import snapshot**. A snapshot is a zip of the workshop store: the unzipped extract, the working set, deletions, drafts, sources, shared sources, captures, change signals, the queue, and export history. It is not the app source, not the card images, and not the catalogue database.
 
 **Export snapshot** downloads that zip immediately. There is no confirmation. **Import snapshot** checks the zip before it changes anything. A zip that is not a snapshot from this export, or a snapshot that is missing a required part, is refused. Say what failed. The current store stays as it is. A valid snapshot asks for confirmation before it replaces the store. The prompt says that this puts the workshop back to that snapshot, and that every change made after it will be discarded. On confirm, replace the whole store. On cancel, leave it. Import does not migrate PostgreSQL.
+
+**Reset app** is a large red control in Settings. It asks the operator to type `CONFIRM`. Any other text does nothing. Cancel does nothing. On `CONFIRM`, stop a run if one is going, then delete the workshop store: the unzipped extract, the working set, removals, drafts, sources, shared sources, captures, the queue, export history, and remembered settings such as the agent choice. The next screen is the upload splash. A snapshot zip the operator already saved outside the app stays where they saved it. The card images in `Workshop/src/data/img` stay. Nothing in the database repo, the site repo, or the extractions repo is deleted or written. No migration is deleted.
 
 ## External sources
 
@@ -246,7 +248,7 @@ The selected agent uses `db/schema.sql` when proposing catalogue values. Generat
 
 ## Stack
 
-TypeScript, React, Material UI, and a Node backend. Filesystem access, the agent calls, and database operations stay on the backend. The package manager is pnpm. Do not use npm or yarn. Commit `pnpm-lock.yaml`. The Node version is `26.13.1`, written in `.nvmrc` at the workshop repo root.
+TypeScript 7, React, Material UI, and a Node backend. The `typescript` dependency is `7.0.2`. Do not use a `7.1.0-dev` nightly. Filesystem access, the agent calls, and database operations stay on the backend. The package manager is pnpm. Do not use npm or yarn. Commit `pnpm-lock.yaml`. The Node version is `26.13.1`, written in `.nvmrc` at the workshop repo root.
 
 `pnpm dev` is how the app runs. It listens on `127.0.0.1:7914` and opens that URL in the browser. This app stays local. Do not add a `start` script, and do not add a production build.
 
@@ -255,15 +257,16 @@ TypeScript, React, Material UI, and a Node backend. Filesystem access, the agent
 - Build the app described in **Stack**. Keep filesystem access, the agent calls, and database operations on the backend.
 - Reuse the extractor’s SQLite draft store if adapting its code. Otherwise use SQLite for drafts, source evidence, change signals, corrections and export history. PostgreSQL is the catalogue database.
 - Read `CLAPTRAPEDIA_DATABASE_DIR`, `CLAPTRAPEDIA_SITE_DIR`, and the local Postgres connection from the workshop environment. The extract arrives as an uploaded zip. The agents are the local `claude` and `codex` CLIs. Keep direct staging and production database URLs out of this app. They belong to the database repo’s release jobs. The site uses its own pooled runtime URL.
-- Follow **Build in chunks**. Stop at the end of each chunk. `/Users/keogh/Sites/claptrapedia/workshop/agents/ui` is look and feel only. Start the test database from `claptrapedia-postgres:17.2` in the migration chunk, before the SQL is applied.
+- Follow **Build in chunks**. At the end of a chunk, run `pnpm test`, then stop. `/Users/keogh/Sites/claptrapedia/workshop/agents/ui` is look and feel only. Start the test database from `claptrapedia-postgres:17.2` in the migration chunk, before the SQL is applied.
 
 ## First release acceptance criteria
 
-- `.nvmrc` is `26.13.1`. `pnpm dev` serves `http://127.0.0.1:7914` and opens it in the browser. There is no `start` script and no production build.
+- `.nvmrc` is `26.13.1`. The `typescript` dependency is `7.0.2`. `pnpm dev` serves `http://127.0.0.1:7914` and opens it in the browser. There is no `start` script and no production build.
 - Resolve `CLAPTRAPEDIA_DATABASE_DIR`, load `db/schema.sql`, and export into that checkout’s `db/migrations/` directory. A missing or invalid path produces a configuration error that names the expected path.
 - The test database is `claptrapedia-postgres:17.2` on `127.0.0.1:5433`. It is not the catalogue container on port 5432.
 - An empty store shows only the upload splash. The app does not read the extractions checkout. After the zip is uploaded, the working set renders from the unzipped copy, with the raw records behind a candidate.
 - Delete removes a dud or a duplicate from the working set immediately. **Restore** puts that candidate back. Uploading the same zip again does not bring a removed candidate back. **Export snapshot** downloads a zip with no confirmation. A snapshot that fails its check does not change the store. **Import snapshot** tells the operator that later work will be discarded, and replaces the store only after they confirm.
+- **Reset app** deletes the workshop store only after the operator types `CONFIRM`, and the next screen is the upload splash. The database repo, the site repo, the extractions repo, and `Workshop/src/data/img` are unchanged.
 - The list groups candidates by type and subtype, and class mods and artifacts by character. Search finds one by name. A duplicate suggestion points at two candidates and merges nothing.
 - **Find pages** on one item stores the URLs and does not capture or write prose. A rejected URL is not added on a second run. **Restore** on that URL puts it back. **Share with** moves a saved URL onto one scope, and a later item reuses that one capture instead of storing the URL again.
 - A wiki proof and a LootLemon proof are saved before the first item is researched. The LootLemon proof came from a rendered page.
