@@ -96,11 +96,69 @@ Research, matching, and every sentence of catalogue prose are done by the select
 
 The workshop runs off one capture, `extract-20261110-124546-348467`. The operator uploads that capture as a `.zip`. The app does not read `/Users/keogh/Sites/claptrapedia/extractions/borderlands1e/extract-20261110-124546-348467` or the `.zip` beside it, and there is no `CLAPTRAPEDIA_EXTRACT_DIR`. Do not scrape the game again.
 
-With an empty workshop store, the only screen is a splash that asks for that zip. No other screen, setting, or run is available until the upload has succeeded. The operator picks the file from their computer. The app unzips it into its own store. Reject a zip whose `manifest.json` is not this capture, and say what was wrong. The capture is extractor `0.3.2`, `format_version` 1, status `complete`, created on 2026-11-10. It is a Borderlands 1 Enhanced pull. `manifest.json` `catalogue.categories` counts the seeds: items, characters, missions, locations, skills, equipment parts, loot pools, and the other categories listed there. `catalogue_identity` records are crawl seeds, not deduplicated catalogue rows. `object`, `archetype_binding` and `world_binding` records are the raw game objects those seeds point at. Read the unzipped files and work out which fields make one item, one enemy, one location and one mission. Do not invent that rule before reading the files. Write the rule down once it is known, and keep the extract id and path on the draft so the operator can open the raw record. Do not write anything back into the extractions repo.
+With an empty workshop store, the only screen is a splash that asks for that zip. No other screen, setting, or run is available until the upload has succeeded. The operator picks the file from their computer. The app unzips it into its own store. Reject a zip whose `manifest.json` is not this capture, and say what was wrong. The capture is extractor `0.3.2`, `format_version` 1, status `complete`, created on 2026-11-10. It is a Borderlands 1 Enhanced pull. `manifest.json` `catalogue.categories` counts the seeds: items, characters, missions, locations, skills, equipment parts, loot pools, and the other categories listed there. `catalogue_identity` records are crawl seeds, not deduplicated catalogue rows. `object`, `archetype_binding` and `world_binding` records are the raw game objects those seeds point at. The candidate rule below is the reading of this capture. Keep the candidate id and the original asset path on the draft so the operator can open the raw record. Do not write anything back into the extractions repo.
 
-The working set is every candidate from that extract except the ones the operator has removed. The extract contains duds and duplicates, including a seed filed as an item that is not an item. **Delete** takes that candidate out of the working set immediately. Its draft and sources stay stored. Delete does not edit the unzipped extract, and it does not delete a published catalogue row. A published row is removed only by a migration. **Removed** lists those candidates. **Restore** puts one back into the working set, with the draft and sources it already had. Uploading the same zip again keeps the removals and the other manual corrections. A run walks the working set and skips removed candidates.
+### Candidate rule
 
-The app suggests candidates that look like the same item. The suggestion is a pointer. The operator deletes one of them. The app does not merge the two, and it does not delete either by itself.
+Read from `extract-20261110-124546-348467`: 9,924 `catalogue_identity` rows. A candidate is one asset path. Use `asset_path` when it is set, otherwise `asset_path_hint`, and compare it in lowercase. An identity with `identity_status` `asset_evidence` or `localisation_candidate` joins that path. When both rows exist they are one candidate. On this capture every paired path in `item`, `equipment_name`, `mission`, `character` and `location` carried the same `names`. The candidate id is the `asset_evidence` id when that row exists (`identity:object:<lowercase path>`), otherwise the localisation id.
+
+The display name is the first `names[].name`. The path stem is not the name. `gd_weap_assault_shotgun.Title.TitleM_Maliwan1_Plague` has PartName `Crux`.
+
+Behind the candidate sit both identity rows, the `object` with the same lowercased path, and any `archetype_binding` or `world_binding` with that path. A second identity that only points at a binding of the same path is the same candidate. Sixty-four pawn paths have both an archetype identity and a world identity.
+
+`field_candidate` and `localisation_field_candidate` are mentions. They hang off the source asset through `source_identity`, `source_asset_path` and `source_record`. They are not candidates.
+
+Class is the last segment of `class` or `class_hint`. The second path segment is the part kind (`Title`, `Title_Eridan`, `Prefix`, `Prefix_Tech`).
+
+**One item.** A `WeaponNamePartDefinition` whose second segment starts with `Title`, in a weapon package, is a weapon. `gd_weap_names_shared` titles (`Fire`, `Corrosion`, `Thunder`) are shared element words and stay in `equipment_name`. Package and filename set the subtype:
+
+| Package or filename token | Subtype |
+| --- | --- |
+| `gd_weap_repeater_pistol`, `gd_weap_machine_pistol`, `TitleU_Repeater_` | `repeater-pistol` |
+| `gd_weap_revolver_pistol` | `revolver` |
+| `gd_weap_patrol_smg`, `TitleU_SMG_` | `smg` |
+| `gd_weap_combat_rifle`, `gd_weap_support_machinegun`, `TitleU_SupportMG_` | `combat-rifle` |
+| `gd_weap_combat_shotgun`, `gd_weap_assault_shotgun` | `shotgun` |
+| `gd_weap_sniper_rifle`, `gd_weap_sniper_rifle_semiauto`, `TitleU_SemiAutoSniper_` | `sniper-rifle` |
+| `gd_weap_rocket_launcher`, `gd_weap_grenade_launcher` | `rocket-launcher` |
+| `gd_weap_alien_rifle`, `Title_Eridan` | `eridian-weapon` |
+
+Hellfire is `gd_weap_patrol_smg.Title.TitleM_Maliwan1_HellFire`, PartName `HellFire`, subtype `smg`. `machine_pistol` maps to `repeater-pistol` because that is the published repeater and both packages are in the capture. Rainmaker is `gd_weap_grenade_launcher.Title.TitleM_SandS1_Rainmaker`, so that package is `rocket-launcher`. Knoxx `TitleP_*` pearls (Aries, Bessie, Tsunami and the rest) have no subtype in the path, so the subtype stays unset. Vehicle guns, turrets, stock weapons and `DELETEDELETE` are weapons with the subtype unset.
+
+An `ItemNamePartDefinition` title is a shield, grenade mod or class mod:
+
+- `gd_shields`, and `dlc3_gd_item_UniqueParts` titles Ironclad, Rose and Omega, are shields. The subtype stays unset. The body part on the same shield (`OC` on Ironclad, `AWE` on Rose) is an `equipment_part`, not the shield.
+- `gd_tunercuffs` is a grenade mod. The subtype is the PartName when it is one of `contact`, `sticky`, `rubberized`, `bouncing-bettie`, `proximity-mine`, `longbow`, `mirv`, `rain`. `MOD` and `Tech` have no subtype.
+- `gd_CommandDecks` and `dlc3_gd_CommandDecks` are class mods. No subtype and no character. A loyalty-deck title is a manufacturer name.
+- `gd_StorageDeckUpgrade` and `gd_ElementalUpgrade.Title` stay in `equipment_name`.
+
+An `ItemDefinition` under `gd_ElementalUpgrade.<Character>.` is an artifact. The path segment is the character: `Roland`, `Lilith`, `Mordecai`, `Brick`. The six `Corrosive_Level_N`, `Explosive_Level_N`, `Incendiary_Level_N` and `Shock_Level_N` paths are one artifact. Level 1 is the row that stays. Its name drops the level number, so Brick's corrosive ladder is `Elemental Artifact - Corrosive Punch`. The other five identities sit on that row, and those five candidates go to **Removed** with the reason. A later upload does not split them again unless the operator has restored one. The card image is `borderlands/artifacts/<character>-<element>.png`. Every other `ItemDefinition` (mission pickups, ammo, currency, repair kits) stays in the `item` group. Those are the seeds filed as items that are not items.
+
+A prefix segment (`Prefix`, `Prefix_Tech`, `Prefix_Starter`) is not an item. It stays one `equipment_name` candidate per path.
+
+**One enemy.** An `AIPawnBalanceDefinition`. The display name is the `DisplayName` entry in `names`. `WillowAIPawn` and `WillowAICranePawn` stay in the character group. The family label is the path segment after the package (`Bandits`, `Skags`, `Franken`). It groups the rows on the list. It is not a published `family_id`.
+
+**One location.** A `TeleportOutpostLookupObject` or an `EmergencyTeleportOutpostDefinition`. Fyrestone is `gd_RegistrationStationList.Lookups.RegistrationStationLookup:Firestone`. The 649 location field rows are `TargetFastTravelStation` keys on missions, and they attach to that mission. A key with no station is not a location. A region stays in the region group. One map is one distinct package name among the map field rows (70 on this capture), and the repeated mentions sit behind it.
+
+**One mission.** A `MissionDefinition`. The name is the `MissionName` entry. Four paths have a localisation row and no object: `Truce?`, `Road Warriors: No Man's Land`, and two `Fresh Off The Bus` rows (`m_introstatesaver02`, `m_introstatesaver03`). They are candidates. A `mission_giver` row is the `MissionGiver` field of that mission.
+
+**Same name, different path.** The localisation row and the asset row of one path are already one candidate. Rows that share a display name and a class are compared after that. The workshop removes a row on its own when the file says which one to keep, and it leaves a duplicate pointer when it cannot tell. It does not merge the raw records.
+
+A row with no game object is removed when another row of that name has one. Bone Head's `Pawn_Balance_Boss_Captain1` is that case, and so are the two `Fresh Off The Bus` rows that have no object, the GameSpy Spy, and the `Title_` leftover next to a `TitleM_` gun. A DLC row is removed when a base-game row has an object and the same balance once a `dlcN_` token is stripped. The Underdome Bone Head (`dlc2_Pawn_Balance_Bonehead`) is that case. The kept row is `gd_Balance_Enemies_Humans.Bandits.Named.Pawn_Balance_Bonehead`. A Knoxx eridian gun whose name token matches the base-game gun is removed the same way. Knoxx's Gold stays on the `dlc3` path, because the `dlc4` path has no object and there is no base-game row.
+
+Numbered variants stay (Zombie, Zombie_2). Two objects with the same name and different stems stay (Crux and the Plague file whose PartName is Crux, Invader and Executioner). Two fast-travel stations that share a name stay. The five class-mod decks that are all named Class Mod stay. **Removed** shows the reason. **Restore** puts that row back and a later upload of the same zip does not take it away again.
+
+The working set is one row per thing. Levels, numbered spawns, a deleted file, and an older copy of the same skill sit on that row. The crawl fills in the stats and the prose later. A different gun that shares a name stays (Crux and the Plague file, Invader and Executioner). A different fast-travel station that shares a name stays. A different character's skill stays.
+
+On this capture the duplicate pass moves 136 rows to **Removed**: 92 with no game object and 44 DLC copies. The folds move another 171: 80 artifact levels, and 91 copies (zombie numbers, Stabby Claptrap's outfits, bank and storage-deck levels, deleted files, older skill files). The working set that remains is 5,657 candidates, 16 artifacts, 165 weapons, 14 SMGs, 414 enemies and 226 missions. The parts, pools, populations and other extract categories stay in the list. They are the data under a record, and a later pass can hang them off the one row.
+
+**Origin.** `origin_hint` is `dlc1`, `dlc2`, `dlc3`, `dlc4`, or empty for the base game. It is stored on the candidate. Two paths stay two candidates when the hint differs.
+
+On this capture that is 5,894 asset candidates plus 70 maps, 5,964 rows. Of those, 203 are weapons. 16 of the weapons are SMGs: the 15 `gd_weap_patrol_smg` titles, including Hellfire, and Typhoon (`TitleU_SMG_`). 515 are enemies, 230 are missions, and 91 sit in the location group. 90 of those are fast-travel stations. `engine.watervolume`, named under water, is filed as a location and stays in that group for the operator to delete. Shields are 49 titles with the subtype unset, grenade mods 11, class mods 19, artifacts 96. The four `gd_ElementalUpgrade.A_Item` shells have no character segment, so they stay in the item group. 106 enemy names point at more than one path.
+
+The working set is every candidate from that extract except the ones the automatic pass removed and the ones the operator has removed. The extract contains duds and duplicates, including a seed filed as an item that is not an item. **Delete** takes that candidate out of the working set immediately. Its draft and sources stay stored. Delete does not edit the unzipped extract, and it does not delete a published catalogue row. A published row is removed only by a migration. **Removed** lists those candidates. **Restore** puts one back into the working set, with the draft and sources it already had. Uploading the same zip again keeps the removals and the other manual corrections. A run walks the working set and skips removed candidates.
+
+A duplicate chip is a case the automatic pass did not settle. The operator deletes one, or leaves both. The app does not merge the raw records.
 
 A candidate sits in the bucket the extract supports. The operator can move it to another item type, and to a subtype when that bucket has one. Class mods and artifacts can be pointed at a character. That correction survives the next run and another upload of the same zip. It does not write a migration by itself.
 
@@ -197,7 +255,7 @@ Every error is kept in full. That includes the item id, the step, the URL, the e
 
 Implement this sequence for a record's first pass. The operator drives each step. A run drives it across the chosen items and can be left running. The app does not write a migration for that first pass until the operator approves it. **Check for updates** is the exception after a recapture: a later capture whose facts changed writes the tested migration itself. A changed page with no new capture does not.
 
-1. **Load the extract.** The operator uploads the zip from the splash. List the working set and show the original game records behind each candidate. The operator deletes a dud or a duplicate.
+1. **Load the extract.** The operator uploads the zip from the splash. List the working set and show the original game records behind each candidate. The automatic pass has already moved the obvious duplicates to **Removed**. The operator deletes a dud or a remaining duplicate, and restores a guess that was wrong.
 2. **Find the pages.** **Find pages** does this step and stops. The selected agent adds the LootLemon and wiki URLs for the entity. No extension. The operator drops a URL that points at the wrong page, and that rejection is kept.
 3. **Capture.** **Open** launches each saved URL for the extension. **Fetch** stores the rendered article with Playwright. The source row says the capture is there. A click opens a modal with the exact stored text. The agent writes the draft from the extract, the item's captures, and the shared captures that match.
 4. **Review the draft.** Show the proposed entry beside the game data, the captures and the current local catalogue values. The operator edits the draft and approves the revision to publish. The capture itself is not edited.
@@ -210,7 +268,7 @@ Use the [Borderlens extractor app](https://github.com/thekeogh/borderlands1e-mod
 ## Import and identity
 
 - Support the existing extractor capture format first. Keep the unzipped capture in the workshop store so the operator can inspect the underlying game records.
-- Preserve extracted record IDs and paths. Where several raw records describe variants of one family, show the grouping and let the operator correct it. A duplicate candidate is deleted, not merged by guesswork.
+- Preserve extracted record IDs and paths. Where several raw records describe variants of one family, show the grouping and let the operator correct it. An obvious duplicate is removed by the rule in the candidate section. Anything the rule cannot settle stays, and the operator deletes it. The raw records are not merged.
 - Use the stable `id` already stored for that game and record type. Mint a new kebab-case `id` only when no existing row matches. Treat names and URL slugs as editable. Check for an existing match before proposing a new row.
 - Uploading the same capture again must preserve approved work, deletions, and other manual corrections. Flag any newly conflicting identity or evidence for review. Importing a snapshot replaces the store with that snapshot.
 - Keep game, release and DLC distinct. A BL1 Enhanced capture supports claims about that release. Copy a fact to another release only when the evidence supports it. Keep an item’s DLC of origin separate from the DLC of a location where it drops.
@@ -267,7 +325,7 @@ TypeScript 7, React, Material UI, and a Node backend. The `typescript` dependenc
 - An empty store shows only the upload splash. The app does not read the extractions checkout. After the zip is uploaded, the working set renders from the unzipped copy, with the raw records behind a candidate.
 - Delete removes a dud or a duplicate from the working set immediately. **Restore** puts that candidate back. Uploading the same zip again does not bring a removed candidate back. **Export snapshot** downloads a zip with no confirmation. A snapshot that fails its check does not change the store. **Import snapshot** tells the operator that later work will be discarded, and replaces the store only after they confirm.
 - **Reset app** deletes the workshop store only after the operator types `CONFIRM`, and the next screen is the upload splash. The database repo, the site repo, the extractions repo, and `Workshop/src/data/img` are unchanged.
-- The list groups candidates by type and subtype, and class mods and artifacts by character. Search finds one by name. A duplicate suggestion points at two candidates and merges nothing.
+- The list groups candidates by type and subtype, and class mods and artifacts by character. Search finds one by name. The automatic pass removes a same-name row that has no game object, and a DLC copy of a base-game row. The six level paths of one elemental artifact fold onto the level 1 row. A remaining duplicate chip is a case those passes left alone. Restore puts an automatic removal back.
 - **Find pages** on one item stores the URLs and does not capture or write prose. A rejected URL is not added on a second run. **Restore** on that URL puts it back. **Share with** moves a saved URL onto one scope, and a later item reuses that one capture instead of storing the URL again.
 - A wiki proof and a LootLemon proof are saved before the first item is researched. The LootLemon proof came from a rendered page.
 - Research an item with the selected agent, review its sources, edit the draft and approve it. Prose in the draft was written by that agent. The draft survives a restart and can be edited when a source is unavailable.

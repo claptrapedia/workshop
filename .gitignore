@@ -38,6 +38,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Workshop store
+.data/
+.staging/
+
 # Build and caches
 dist/
 build/
