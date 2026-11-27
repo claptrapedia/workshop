@@ -17,7 +17,20 @@ const { candidateDetail, listCandidates, removeCandidate, restoreCandidate, summ
 const { getDb } = await import('./db.ts')
 const { dataDir, imgDir } = await import('./paths.ts')
 const { acceptsReset, confirmSnapshot, exportSnapshot, resetStore, stageSnapshot } = await import('./snapshot.ts')
-const { agentLaunch, askAgent, getAgent, setAgent } = await import('./agent.ts')
+const { agentLaunch, askAgent, getAgent, setAgent, taskLaunch } = await import('./agent.ts')
+const {
+  addSource,
+  approveDraft,
+  fetchItemSource,
+  findPages,
+  rejectSource,
+  researchView,
+  restoreSource,
+  saveDraft,
+  shareSource,
+  unapproveDraft,
+  writeDraft,
+} = await import('./research.ts')
 const { captureText, fetchSource, listSources, lootlemonFact, wikiFact } = await import('./sources.ts')
 
 type Member = {
@@ -441,6 +454,168 @@ test('a LootLemon fetch stores the rendered parts and ignores the page shell', a
   assert.match(captureText(row.id), /Body_1/)
   await assert.rejects(fetchSource('missing'), /Unknown source/)
 })
+
+test('a page search may use the web and a draft may not', () => {
+  const search = taskLaunch('claude', 'claude-sonnet-5-5', 'find hellfire', 'search')
+  assert.equal(flag(search.args, '--model'), 'claude-sonnet-5-5')
+  assert.equal(flag(search.args, '--effort'), 'medium')
+  assert.equal(flag(search.args, '--tools'), 'WebSearch,WebFetch')
+  assert.equal(flag(search.args, '--allowedTools'), 'WebSearch,WebFetch')
+  assert.equal(flag(search.args, '--permission-mode'), 'dontAsk')
+  assert.equal(flag(search.args, '--permission-prompts'), 'none')
+  assert.equal(search.args.at(-1), 'find hellfire')
+
+  const draft = taskLaunch('claude', 'claude-sonnet-5-5', 'write hellfire', 'draft')
+  assert.ok(draft.args.includes('--tools='))
+  assert.equal(draft.args.at(-1), 'write hellfire')
+  assert.equal(flag(draft.args, '--effort'), 'medium')
+
+  const codex = taskLaunch('codex', 'gpt-6.2-sol', 'find hellfire', 'search')
+  assert.equal(flag(codex.args, '-m'), 'gpt-6.2-sol')
+  assert.ok(codex.args.includes('read-only'))
+  assert.equal(codex.args.at(-1), 'find hellfire')
+})
+
+test('Hellfire pages can be stored, shared, drafted, and unapproved', { timeout: 180_000 }, async () => {
+  importExtract(ZIP)
+  const hellfire = idWhere(`c.path LIKE '%titlem_maliwan1_hellfire'`)
+  const crux = idWhere(`c.path LIKE '%titlem_sands1_crux'`)
+  const foundReply = async () => ({
+    model: 'claude-sonnet-5-5',
+    reply: JSON.stringify({
+      wiki: 'https://borderlands.fandom.com/wiki/Hellfire_(Borderlands)',
+      lootlemon: 'https://www.lootlemon.com/weapon/hellfire-bl1',
+    }),
+  })
+
+  await assert.rejects(
+    findPages(crux, async () => {
+      throw new Error('should not ask')
+    }),
+    /only on Hellfire/,
+  )
+  await assert.rejects(
+    findPages(hellfire, async () => ({
+      model: 'claude-sonnet-5-5',
+      reply: '{"wiki":"https://example.com/wiki/Hellfire","lootlemon":null}',
+    })),
+    /did not find a direct page/,
+  )
+  assert.equal(researchView(hellfire).sources.length, 0)
+  assert.equal(researchView(hellfire).draft, null)
+
+  const found = await findPages(hellfire, foundReply)
+  assert.deepEqual(
+    found.sources.map((row) => row.url).sort(),
+    [
+      'https://borderlands.fandom.com/wiki/Hellfire_(Borderlands)',
+      'https://www.lootlemon.com/weapon/hellfire-bl1',
+    ].sort(),
+  )
+  assert.ok(found.sources.every((row) => row.via === null && !row.rejected))
+  assert.equal(found.draft, null)
+  const wiki = found.sources.find((row) => row.site === 'wiki')
+  const loot = found.sources.find((row) => row.site === 'lootlemon')
+  assert.ok(wiki && loot)
+  assert.throws(() => captureText(wiki.id), /No capture stored/)
+
+  const rejected = rejectSource(loot.id)
+  assert.equal(rejected.sources.find((row) => row.id === loot.id)?.rejected, true)
+  const again = await findPages(hellfire, foundReply)
+  assert.equal(again.sources.filter((row) => row.url === loot.url).length, 1)
+  assert.equal(again.sources.find((row) => row.url === loot.url)?.rejected, true)
+  const restored = restoreSource(loot.id)
+  assert.equal(restored.sources.find((row) => row.id === loot.id)?.rejected, false)
+
+  assert.throws(() => addSource(hellfire, 'https://example.com/hellfire'), /Borderlands Wiki/)
+  const fireUrl = 'https://borderlands.fandom.com/wiki/Incendiary'
+  const added = addSource(hellfire, fireUrl)
+  const fire = added.sources.find((row) => row.url === fireUrl)
+  assert.ok(fire)
+  const fetchedFire = await fetchItemSource(fire.id, { wiki: wikiPages('Incendiary is the fire element.') })
+  assert.match(captureText(fire.id), /fire element/)
+  assert.equal(fetchedFire.sources.find((row) => row.id === fire.id)?.fact, 'Incendiary')
+  assert.throws(() => shareSource(fire.id, 'element', 'corrosive'), /scope this weapon matches/)
+  const shared = shareSource(fire.id, 'element', 'incendiary')
+  assert.equal(shared.sources.some((row) => row.url === fireUrl), false)
+  assert.equal(shared.shared.find((row) => row.url === fireUrl)?.scope?.value, 'incendiary')
+  assert.match(captureText(fire.id), /fire element/)
+
+  const leftShared = await findPages(hellfire, async () => ({
+    model: 'claude-sonnet-5-5',
+    reply: JSON.stringify({ wiki: fireUrl, lootlemon: loot.url }),
+  }))
+  assert.equal(leftShared.sources.some((row) => row.url === fireUrl), false)
+  assert.equal(leftShared.shared.some((row) => row.url === fireUrl), true)
+
+  let asked = 0
+  await assert.rejects(
+    writeDraft(hellfire, async () => {
+      asked += 1
+      return { model: 'claude-sonnet-5-5', reply: '{}' }
+    }),
+    /own page/,
+  )
+  assert.equal(asked, 0)
+
+  const fetchedWiki = await fetchItemSource(wiki.id, { wiki: wikiPages(WIKITEXT) })
+  assert.equal(fetchedWiki.canWrite, true)
+  assert.equal(fetchedWiki.sources.find((row) => row.id === wiki.id)?.fact, 'Maliwan Incendiary Submachine Gun, damage 20–359')
+  await assert.rejects(
+    writeDraft(hellfire, async () => ({ model: 'claude-sonnet-5-5', reply: '{}' })),
+    /empty draft/,
+  )
+
+  const summary = 'Hellfire is a Maliwan submachine gun that sets targets alight.'
+  let prompt = ''
+  const drafted = await writeDraft(hellfire, async (_purpose, text) => {
+    prompt = text
+    return {
+      model: 'claude-sonnet-5-5',
+      reply: JSON.stringify({
+        summary,
+        description: 'The fire burst is part of the shot. It favours heat over a large magazine.',
+        manufacturer: 'Maliwan',
+        element: 'Incendiary',
+        rarity: '',
+        damage: '20–359',
+      }),
+    }
+  })
+  assert.match(prompt, /British spelling/)
+  assert.match(prompt, /manufacturer = Maliwan/)
+  assert.match(prompt, /fire element/)
+  assert.match(prompt, /shared as element incendiary/)
+  assert.doesNotMatch(prompt, /lootlemon\.com\/weapon\/hellfire-bl1/)
+  assert.equal(drafted.draft?.summary, summary)
+  assert.equal(drafted.draft?.model, 'claude-sonnet-5-5')
+  assert.equal(drafted.draft?.approved, false)
+
+  const approved = approveDraft(hellfire)
+  assert.equal(approved.draft?.approved, true)
+  await assert.rejects(
+    writeDraft(hellfire, async () => {
+      throw new Error('agent was called')
+    }),
+    /will not replace it/,
+  )
+  assert.equal(researchView(hellfire).draft?.summary, summary)
+
+  const edited = saveDraft(hellfire, { summary: 'Edited while approved.' })
+  assert.equal(edited.draft?.summary, 'Edited while approved.')
+  assert.equal(edited.draft?.approved, true)
+  const withdrawn = unapproveDraft(hellfire)
+  assert.equal(withdrawn.draft?.summary, summary)
+  assert.equal(withdrawn.draft?.approved, false)
+  assert.equal(researchView(hellfire).draft?.summary, summary)
+})
+
+function wikiPages(text: string) {
+  return async (url: string) => {
+    if (url.includes('action=parse')) return { parse: { wikitext: { '*': text } } }
+    return { query: { pages: { '1': { revisions: [{ revid: 7, timestamp: '2026-01-06T03:09:57Z' }] } } } }
+  }
+}
 
 function flag(args: string[], name: string): string | undefined {
   return args[args.indexOf(name) + 1]

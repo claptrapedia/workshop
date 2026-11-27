@@ -3,7 +3,9 @@ import { createHash } from 'node:crypto'
 import type { ItemSource, ResearchView, SourceScope, SourceSignal, SourceSite, WeaponDraft } from '../shared/types.ts'
 import { completeAgent, getAgent } from './agent.ts'
 import { getDb } from './db.ts'
-import { captureText, openUrl, storePageCapture } from './sources.ts'
+import { captureText, openUrl, storePageCapture, type SourceReaders } from './sources.ts'
+
+export type AgentReply = (purpose: 'search' | 'draft', prompt: string) => Promise<{ model: string; reply: string }>
 
 export function researchView(candidateId: string): ResearchView {
   const weapon = hellfire(candidateId)
@@ -22,10 +24,10 @@ export function researchView(candidateId: string): ResearchView {
   }
 }
 
-export async function findPages(candidateId: string): Promise<ResearchView> {
+export async function findPages(candidateId: string, replyWith?: AgentReply): Promise<ResearchView> {
   const weapon = hellfire(candidateId)
-  const { reply } = await completeAgent(
-    getAgent(),
+  const { reply } = await ask(
+    'search',
     [
       'Find the direct pages for one Borderlands 1 weapon.',
       `Name: ${weapon.name}`,
@@ -35,7 +37,7 @@ export async function findPages(candidateId: string): Promise<ResearchView> {
       'The wiki URL must be on borderlands.fandom.com. The LootLemon URL must be a weapon page on www.lootlemon.com.',
       'Use null when you cannot find a direct page. Do not invent a URL. Do not return a search page or a category page.',
     ].join('\n'),
-    'search',
+    replyWith,
   )
   const urls = pagesIn(reply)
   if (!urls.length) throw new Error(`The agent did not find a direct page.\n\n${clip(reply)}`)
@@ -102,12 +104,12 @@ export function shareSource(sourceId: string, kind: unknown, value: unknown): Re
   return researchView(weapon.id)
 }
 
-export async function fetchItemSource(sourceId: string): Promise<ResearchView> {
+export async function fetchItemSource(sourceId: string, readers: SourceReaders = {}): Promise<ResearchView> {
   const source = mustSource(sourceId)
   const owner = source.candidateId ?? hellfireId()
   if (!owner) throw new Error('Hellfire is not in the working set.')
   try {
-    const stored = await storePageCapture(source.id, source.site, source.url)
+    const stored = await storePageCapture(source.id, source.site, source.url, readers)
     writeSource({
       ...source,
       fact: stored.fact,
@@ -127,7 +129,7 @@ export async function openItemSource(sourceId: string): Promise<void> {
   await openUrl(source.url)
 }
 
-export async function writeDraft(candidateId: string): Promise<ResearchView> {
+export async function writeDraft(candidateId: string, replyWith?: AgentReply): Promise<ResearchView> {
   const view = researchView(candidateId)
   if (view.draft?.approved) throw new Error('This draft is approved. A new proposal will not replace it.')
   if (!view.canWrite) throw new Error('Fetch Hellfire’s own page before writing the draft.')
@@ -136,8 +138,8 @@ export async function writeDraft(candidateId: string): Promise<ResearchView> {
     ...view.sources.filter((row) => !row.rejected && row.via),
     ...view.shared.filter((row) => !row.rejected && row.via),
   ]
-  const { model, reply } = await completeAgent(
-    getAgent(),
+  const { model, reply } = await ask(
+    'draft',
     [
       'Write the catalogue draft for the Borderlands 1 weapon Hellfire.',
       'Use British spelling. Write sentences that belong to this catalogue.',
@@ -156,7 +158,7 @@ export async function writeDraft(candidateId: string): Promise<ResearchView> {
         '',
       ]),
     ].join('\n'),
-    'draft',
+    replyWith,
   )
   const body = jsonObject(reply) as Record<string, unknown>
   const draft: WeaponDraft = {
@@ -211,6 +213,15 @@ export function unapproveDraft(candidateId: string): ResearchView {
   const held = current.held ?? fields(current)
   storeDraft({ ...current, ...held, approved: false, held: undefined })
   return researchView(weapon.id)
+}
+
+async function ask(
+  purpose: 'search' | 'draft',
+  prompt: string,
+  replyWith?: AgentReply,
+): Promise<{ model: string; reply: string }> {
+  if (replyWith) return replyWith(purpose, prompt)
+  return completeAgent(getAgent(), prompt, purpose)
 }
 
 function hellfire(candidateId: string): { id: string; name: string } {

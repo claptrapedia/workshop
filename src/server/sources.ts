@@ -54,11 +54,13 @@ export async function storePageCapture(
   id: string,
   site: SourceSite,
   url: string,
+  readers: SourceReaders = {},
 ): Promise<{ fact: string; signal: SourceSignal }> {
   if (site === 'wiki') {
+    const read = readers.wiki ?? wikiJson
     const page = wikiPageName(url)
-    const parsed = await wikiJson(wikiParseUrl(page))
-    const queried = await wikiJson(wikiRevisionUrl(page))
+    const parsed = await read(wikiParseUrl(page))
+    const queried = await read(wikiRevisionUrl(page))
     const text = wikitextOf(parsed)
     const revision = revisionOf(queried)
     let fact = page.replaceAll('_', ' ')
@@ -72,7 +74,7 @@ export async function storePageCapture(
     saveSignal(id, signal)
     return { fact, signal }
   }
-  const loaded = await renderLootlemon(url)
+  const loaded = readers.page ? await readers.page(url) : await renderLootlemon(url)
   const stored = lootlemonCapture(loaded)
   saveCapture(id, stored.text)
   saveSignal(id, stored.signal)

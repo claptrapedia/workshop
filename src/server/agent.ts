@@ -93,7 +93,7 @@ export async function completeAgent(
   }
 }
 
-function taskLaunch(
+export function taskLaunch(
   agent: AgentId,
   model: string,
   prompt: string,
