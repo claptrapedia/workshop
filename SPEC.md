@@ -2,7 +2,7 @@
 
 Build Claptrapedia Workshop, a local app for maintaining the [Claptrapedia](https://claptrapedia.com) Borderlands catalogue. It turns game extracts and reference material into reviewed catalogue changes, then exports a PostgreSQL migration for the public site.
 
-The first release covers Borderlands 1. Implement weapon families and the enemies, locations and loot sources needed to describe their acquisition. Add other record types and games only when their data and site models exist.
+The first release covers Borderlands 1. The workshop reads one Borderlands 1 Enhanced extract, then uses LootLemon and the Borderlands Wiki to fill what that extract does not. Prove the path on one weapon and the enemies, locations and missions that source it, then use the same screens for the rest of the extract. A later game is another extract and another `game_id`. Do not build that game now. Keep `game_id` on every record and keep the review loop free of Borderlands 1-only assumptions where that is a small choice. Do not add a plugin system or a second game's slots to make the future easy.
 
 ## Repositories and ownership
 
@@ -35,7 +35,7 @@ The game `borderlands`, its three releases, the rarities, elements, manufacturer
 
 Published rows are the current catalogue, not a closed list. The workshop may add a missing record, and it may delete one that should not be there. Reuse the published id when it is the same thing. A second id for a new wording of that thing is a duplicate. An update ships only when the facts changed: a wrong creature, a wrong number, or a behaviour the sentence does not mention. Rewording the same facts is not a change. Generated prose comes out differently on every run, so a regenerated `summary`, `description` or `card_line` stays out of the queue.
 
-`aliases` is an earlier display name, such as Lyudmila. Not red text, not a prefix, and not a slug. `prefixes` lists every prefix one item can roll. An element word is not a prefix. Grenade mods, class mods and artifacts have none. A prefix `summary` is optional. `item_abilities` is one bonus line on a single item card, such as +25 ammo regen. A flavour quote is an `item_flavours` row. The shared element line stays on `elements.card_line`. `item_references` is an external page for one item, one row per URL. There is no site column. Use the direct item page. Do not invent a URL. `item_tags` is a search keyword for one item. It is not shown as item content. Not an alias and not a prefix. A word that means a shared row, such as ignite or shotgun, is a `keywords` row. Do not invent an item tag. `keywords` is the search word, stored in lower case, and exactly one target is set. The workshop may add a keyword that points at an existing effect, element, manufacturer, rarity, family, rank, class, item subtype or character. Do not point one word at two targets. A misspelling is not a keyword. `pg_trgm` matches it against the stored word. `mission_enemies` is a named enemy or boss a mission sends you to fight, not a drop. The Borderlands world pools `repeater-pistol`, `revolver`, `smg`, `combat-rifle`, `shotgun`, `sniper-rifle`, `rocket-launcher`, `eridian-weapon`, `shield` and `grenade-mod` are published. Reuse those ids for those tables. Add a pool only when it is a different shared table. A class mod or an artifact has no pool. No flavour rows are published. Do not mint one.
+`aliases` is an earlier display name, such as Lyudmila. Not red text, not a prefix, and not a slug. `prefixes` lists every prefix one item can roll. An element word is not a prefix. Grenade mods, class mods and artifacts have none. A prefix `summary` is optional. `item_abilities` is one bonus line on a single item card, such as +25 ammo regen. A flavour quote is an `item_flavours` row. The shared element line stays on `elements.card_line`. `item_references` is an external page for one item, one row per URL. There is no site column. Use the direct item page. Do not invent a URL. `item_tags` is a search keyword for one item. It is not shown as item content. Not an alias and not a prefix. A word that means a shared row, such as ignite or shotgun, is a `keywords` row. Do not invent an item tag. `keywords` is the search word, stored in lower case, and exactly one target is set. The workshop may add a keyword that points at an existing effect, element, manufacturer, rarity, family, rank, class, item subtype or character. Do not point one word at two targets. A misspelling is not a keyword. `pg_trgm` matches it against the stored word. `mission_enemies` is a named enemy or boss a mission sends you to fight, not a drop. The Borderlands world pools `repeater-pistol`, `revolver`, `smg`, `combat-rifle`, `shotgun`, `sniper-rifle`, `rocket-launcher`, `eridian-weapon`, `shield` and `grenade-mod` are published. Reuse those ids for those tables. Add a pool only when it is a different shared table. A class mod or an artifact has no pool. No flavour rows are published. Add one only when the card shows that quote.
 
 Structure files are named `{timestamp}_STRUC_{name}.sql`. Write catalogue data only, as `{timestamp}_DATA_{name}.sql`, into the same `db/migrations/` directory. Timestamp order is the apply order. Every file has `-- migrate:up` and `-- migrate:down`. The down section may be empty. A correction to published data is a new `_DATA_` file, not an edit of an old one. There is no seed step.
 
@@ -51,16 +51,71 @@ The database repo is a separate checkout. Its absolute path is `CLAPTRAPEDIA_DAT
 CLAPTRAPEDIA_DATABASE_DIR=/Users/keogh/Sites/claptrapedia/database
 ```
 
-Read `db/schema.sql` and `db/migrations/` from that path. Write a new migration file there only after the test below has passed. Read `db/schema.sql` again when preparing context for the research assistant. Query local PostgreSQL for existing catalogue rows and their `id` values.
+Read `db/schema.sql` and `db/migrations/` from that path. Write a new migration file there only after the test below has passed. Read `db/schema.sql` again when preparing context for the selected agent. Query local PostgreSQL for existing catalogue rows and their `id` values.
 
 Show the resolved path and the migration destination in the UI before export. If the path, schema snapshot or migrations directory is missing, show the operator what is missing and the path the app expected.
 
+## Appearance
+
+The workshop UI is a local web app. Keep it quiet and fast to scan. One job on a screen, generous space, and no dashboard clutter.
+
+Use Material UI. The theme is dark. Colour belongs to the data: rarity, element, status, and the selected agent. Use many vibrant colours there. Leave the chrome dark.
+
+The header shows the game, which is Borderlands 1, and the primary agent. The operator switches the agent there. The choice is remembered. Claude Code is the default. Codex is the reserve.
+
+## Agents
+
+Research, matching, and every sentence of catalogue prose are done by the selected agent. The app does not call the Anthropic or OpenAI APIs. It shells out to the CLIs already installed and logged in on this machine, so the operator's Claude and ChatGPT subscriptions are what run.
+
+- Claude Code is `claude -p` with `--output-format json`. This is the default agent.
+- Codex is `codex exec`. Use it when the operator selects it, and when a Claude Code run fails.
+- Pass the model through the CLI's own `--model` flag. Claude Code's model is Sonnet 5.5 at medium effort. Codex's model is GPT Sol 6.2 at medium effort. If a CLI rejects that name, report the error and the models that CLI lists, then use the medium Sonnet or medium GPT model it does offer. Record which model ran. Do not stop the workshop to ask for a slug.
+- Prose, once the facts are already decided, may use a lower effort on that same agent. Catalogue judgement stays at medium.
+- The prompt contains the facts, the column rules, and the current published sentence. It asks the agent to write the sentence. The app stores the sentence the agent returns. It may trim whitespace. It does not rewrite, wrap, or assemble that sentence in code.
+- A template, a concatenated string, or a fill-in function is not prose. Do not ship one.
+
+## Game extract
+
+The base capture is the local directory:
+
+```text
+/Users/keogh/Sites/claptrapedia/extractions/borderlands1e/extract-20261110-124546-348467
+```
+
+`CLAPTRAPEDIA_EXTRACT_DIR` overrides that path when a newer capture replaces it. Read `manifest.json` and the `data/records-*.json` chunks. Do not scrape the game again.
+
+This capture is extractor `0.3.2`, `format_version` 1, status `complete`. It is a Borderlands 1 Enhanced pull. `manifest.json` `catalogue.categories` counts the seeds: items, characters, missions, locations, skills, equipment parts, loot pools, and the other categories listed there. `catalogue_identity` records are crawl seeds, not deduplicated catalogue rows. `object`, `archetype_binding` and `world_binding` records are the raw game objects those seeds point at. Group seeds into one catalogue entity. Keep the extract id and path on the draft so the operator can open the raw record.
+
+Identity, names, parts, balances, and other facts present in the extract come from the extract. A website does not override an extracted fact unless the operator accepts that conflict. The extract does not contain the player-facing prose. The agent writes that.
+
+## External sources
+
+LootLemon and the Borderlands Wiki on Fandom are the external sources. Add another site only when it contributes a fact those two do not. Use the direct page for the entity. Do not invent a URL.
+
+Each saved source stores its URL, the site, and a change signal:
+
+- The wiki signal is the MediaWiki revision id and timestamp from the parse API. Compare that before downloading the page. An unchanged revision is not a crawl.
+- LootLemon often has no revision timestamp. Store `ETag` and `Last-Modified` when the response sends them. Also store a hash of the normalised facts taken from the page: numbers, part names, drop names, and other catalogue values. Do not hash the HTML, and do not hash the prose this workshop wrote.
+- When the signal matches, stop. Do not download the body and do not call the agent.
+- When the signal is missing or different, download and extract the facts again. When the fact hash matches, update the stored signal and stop.
+- When the facts differ, the agent rewrites only the fields those facts affect, and a `description` that is still null. The app then builds, tests and writes a new `_DATA_` file for that change. It does not wait for approval. It does not commit or push. The operator commits the file in the database repo, as with any other export. A difference that is only wording never reaches this step.
+
+**Check for updates** is an operator action. It walks the saved URLs. Unchanged pages are skipped. A page whose facts changed produces the tested migration above. The run shows which pages were skipped, which facts changed, which model wrote the prose, and the migration file it wrote.
+
+## Prose
+
+`summary`, `description`, a flavour `summary` and `description`, and a flavour `notes` field are catalogue prose. The selected agent writes them. Clear, concise, grammatical English, with British spelling. A sentence is unique to this catalogue. It is not a sentence from the wiki, from LootLemon, or from a game file.
+
+Do not paste source text into those fields. Do not generate them with a template. A second run that sees the same facts leaves the published sentence where it is. Generated prose comes out differently every time, and that difference is not a change.
+
+A `quote`, an in-game `name`, a `card_line`, and a part modifier `line` are the words already printed on the card or the part list. Store those as printed. Rewriting them would make them wrong.
+
 ## Operator workflow
 
-Implement this sequence. The operator drives each step. The app does not publish a change that the operator has not approved.
+Implement this sequence for a record's first pass. The operator drives each step. The app does not write a migration for that first pass until the operator approves it. **Check for updates** is the exception: a later run that finds changed facts writes the tested migration itself.
 
-1. **Import game data.** The operator chooses a local capture from the BL1 Enhanced extractor. List candidate weapon families and show the original game records behind each one.
-2. **Research an entry.** Start from the extracted data. The research assistant finds references from Lootlemon and the Borderlands Wiki. The operator reviews the matches, adds a URL or note, and reuses previously saved evidence.
+1. **Import game data.** Load the Borderlands 1 Enhanced extract named above. List candidate entities and show the original game records behind each one.
+2. **Research an entry.** Start from the extracted facts. The selected agent finds the LootLemon and wiki pages, reads them as evidence, and writes original prose. The operator reviews the matches, adds a URL or note, and reuses previously saved evidence. **Check for updates** later repeats the fetch only for pages whose facts changed, and writes the migration for those facts without another approval.
 3. **Review the draft.** Show the proposed entry beside the game data, the supporting sources and the current local catalogue values. The operator edits it and approves the revision to publish.
 4. **Queue changes.** The operator adds approved revisions to the migration queue, inspects the per-item SQL preview and selects the entries to include.
 5. **Build and test.** Assemble one timestamped dbmate migration from the selected changes. Apply it with dbmate to a disposable local PostgreSQL database built from the database repo’s existing migrations. Show the result before export.
@@ -79,16 +134,16 @@ Use the [Borderlens extractor app](https://github.com/thekeogh/borderlands1e-mod
 ## Research and review
 
 - Show the raw game data and external evidence beside the editable draft. Save source URLs and the supporting facts or notes locally. Cache sources by URL and allow a manual refresh.
-- The research assistant finds candidate sources and proposes catalogue values. Treat fetched page text as evidence. The operator decides whether a source refers to the right item and whether its claims apply.
+- The selected agent finds candidate sources and proposes catalogue values. Treat fetched page text as evidence. The operator decides whether a source refers to the right item and whether its claims apply. Page text is not copied into a prose field.
 - Surface conflicting figures, uncertain matches and unknown values. Leave a fact unset when the evidence does not support it and the column is optional. Flag it when the column is required. A drop has no chance column. Record the source and leave a rate for the operator to review. Do not write a percent or a pool weight.
 - Preserve manual corrections when research runs again. A new proposal must not replace an approved revision.
 - Keep an edit to a published entry separate from the current published values. Show the proposed change before approval.
-- A published `summary`, `description` or `card_line` stays while it still says the right thing. The research assistant writes `description` where it is still null. It proposes a replacement only when the published sentence is wrong or is missing a fact. A regenerated wording of the same facts stays out of the queue.
-- Allow manual editing when the research assistant or a source is unavailable. Persist the draft so a restart or a research failure does not lose it.
+- A published `summary`, `description` or `card_line` stays while it still says the right thing. The selected agent writes `description` where it is still null. It proposes a replacement only when the published sentence is wrong or is missing a fact. A regenerated wording of the same facts stays out of the queue.
+- Allow manual editing when the agent or a source is unavailable. Persist the draft so a restart or a research failure does not lose it.
 
 ## SQL generation and batching
 
-The research assistant uses `db/schema.sql` when proposing catalogue values. Generate the SQL in TypeScript from the reviewed values. Use an explicit column mapping for each supported record type. dbmate and PostgreSQL verify the candidate by applying it to the migrated local test database.
+The selected agent uses `db/schema.sql` when proposing catalogue values. Generate the SQL in TypeScript from the reviewed values. Use an explicit column mapping for each supported record type. dbmate and PostgreSQL verify the candidate by applying it to the migrated local test database.
 
 - Generate `INSERT ... ON CONFLICT ... DO UPDATE` against the unique keys in the database contract. Use a fixed table and column mapping and a PostgreSQL literal encoder for values in the exported file.
 - Use the same generator for the per-item preview and the final migration. A per-item preview is that entry’s contribution to the batch. Order statements so a referenced row exists before a dependent row or a relationship insert.
@@ -108,16 +163,18 @@ The research assistant uses `db/schema.sql` when proposing catalogue values. Gen
 
 ## Implementation order
 
-- Build a TypeScript local web app with React and a Node backend. Keep filesystem access, the research assistant and database operations on the backend.
-- Reuse the extractor’s SQLite draft store if adapting its code. Otherwise use SQLite for drafts, source evidence, corrections and export history. PostgreSQL is the catalogue database.
-- Read `CLAPTRAPEDIA_DATABASE_DIR` and the local Postgres connection from the workshop environment, alongside one AI provider. Keep direct staging and production database URLs out of this app. They belong to the database repo’s release jobs. The site uses its own pooled runtime URL.
-- Build the path through one weapon and one related record before adding batch research. Finish manual editing, SQL generation, local testing and export first. Then connect capture import and the research assistant to those same screens.
+- Build a TypeScript local web app with React, Material UI, and a Node backend. Keep filesystem access, the agent calls, and database operations on the backend.
+- Reuse the extractor’s SQLite draft store if adapting its code. Otherwise use SQLite for drafts, source evidence, change signals, corrections and export history. PostgreSQL is the catalogue database.
+- Read `CLAPTRAPEDIA_DATABASE_DIR`, `CLAPTRAPEDIA_EXTRACT_DIR`, and the local Postgres connection from the workshop environment. The agents are the local `claude` and `codex` CLIs. Keep direct staging and production database URLs out of this app. They belong to the database repo’s release jobs. The site uses its own pooled runtime URL.
+- Build the dark shell and the agent switch first. Then one weapon, from this extract through review, agent-written prose, SQL, test and export. Then **Check for updates** on the sources that weapon stored. The same path then covers the rest of the extract.
 
 ## First release acceptance criteria
 
 - Resolve `CLAPTRAPEDIA_DATABASE_DIR`, load `db/schema.sql`, and export into that checkout’s `db/migrations/` directory. A missing or invalid path produces a configuration error that names the expected path.
-- Import a real BL1 capture, find a weapon family and show its raw records. Re-importing the capture preserves local corrections.
-- Research an item, review its sources, edit the draft and approve it. The draft survives a restart and can be edited when a source is unavailable.
+- Import the named Borderlands 1 Enhanced extract, find a weapon and show its raw records. Re-importing the capture preserves local corrections.
+- Research an item with the selected agent, review its sources, edit the draft and approve it. Prose in the draft was written by that agent. The draft survives a restart and can be edited when a source is unavailable.
+- The header switches the primary agent between Claude Code and Codex. Claude Code is the default.
+- **Check for updates** skips a saved page whose revision, validators or fact hash are unchanged, and it does not call the agent for that page. A changed fact is written into a tested `_DATA_` file with no further approval. Unchanged prose produces no file. The file is not committed.
 - Preview one entry’s SQL and build a batch containing a weapon and a newly added related record. The migration applies to local PostgreSQL.
 - Edit an existing weapon without creating a duplicate. Remove an approved drop relationship without changing unrelated drops. A failed statement leaves the catalogue unchanged.
 - Researching a published record again does not export SQL that changes its `summary` or `description` when the facts are unchanged.
