@@ -1,5 +1,27 @@
 export type AgentId = 'claude' | 'codex'
 
+export type SourceSite = 'wiki' | 'lootlemon'
+
+export type SourceSignal = {
+  revisionId: number | null
+  revisedAt: string | null
+  etag: string | null
+  lastModified: string | null
+  factHash: string | null
+}
+
+export type SourceProof = {
+  id: string
+  site: SourceSite
+  name: string
+  url: string
+  fact: string | null
+  via: 'fetch' | null
+  capturedAt: string | null
+  signal: SourceSignal | null
+  error: string | null
+}
+
 export type AgentPing = {
   agent: AgentId
   model: string

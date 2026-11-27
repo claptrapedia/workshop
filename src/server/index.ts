@@ -32,6 +32,7 @@ import {
   resetStore,
   stageSnapshot,
 } from './snapshot.ts'
+import { captureText, fetchSource, listSources, openSource } from './sources.ts'
 
 if (process.versions.node !== '26.13.1') {
   console.error(`Workshop needs Node 26.13.1 (.nvmrc). This process is ${process.versions.node}.`)
@@ -87,6 +88,51 @@ async function main(): Promise<void> {
     }
     try {
       res.json({ agent: setAgent(req.body?.agent) })
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.get('/api/sources', (_req, res) => {
+    if (!storeIsReady()) {
+      res.status(400).json({ error: 'Upload an extract first.' })
+      return
+    }
+    res.json(listSources())
+  })
+
+  app.get('/api/sources/:id/capture', (req, res) => {
+    if (!storeIsReady()) {
+      res.status(400).json({ error: 'Upload an extract first.' })
+      return
+    }
+    try {
+      res.json({ text: captureText(req.params.id) })
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.post('/api/sources/:id/fetch', async (req, res) => {
+    if (!storeIsReady()) {
+      res.status(400).json({ error: 'Upload an extract first.' })
+      return
+    }
+    try {
+      res.json(await fetchSource(req.params.id))
+    } catch (error) {
+      res.status(400).json({ error: message(error) })
+    }
+  })
+
+  app.post('/api/sources/:id/open', async (req, res) => {
+    if (!storeIsReady()) {
+      res.status(400).json({ error: 'Upload an extract first.' })
+      return
+    }
+    try {
+      await openSource(req.params.id)
+      res.json({ ok: true })
     } catch (error) {
       res.status(400).json({ error: message(error) })
     }

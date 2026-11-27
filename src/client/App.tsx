@@ -4,10 +4,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from './api.ts'
 import { Library } from './Library.tsx'
 import { Settings } from './Settings.tsx'
+import { Sources } from './Sources.tsx'
 import { Splash } from './Splash.tsx'
 import type { AgentId, AgentPing, Status } from '../shared/types.ts'
 
-type View = 'library' | 'removed' | 'settings'
+type View = 'library' | 'removed' | 'sources' | 'settings'
 
 export function App() {
   const [status, setStatus] = useState<Status | null>(null)
@@ -113,6 +114,9 @@ export function App() {
         <Button color={view === 'removed' ? 'primary' : 'inherit'} onClick={() => setView('removed')}>
           Removed
         </Button>
+        <Button color={view === 'sources' ? 'primary' : 'inherit'} onClick={() => setView('sources')}>
+          Sources
+        </Button>
         <Button color={view === 'settings' ? 'primary' : 'inherit'} onClick={() => setView('settings')}>
           Settings
         </Button>
@@ -149,6 +153,8 @@ export function App() {
               setStatus({ ready: false })
             }}
           />
+        ) : view === 'sources' ? (
+          <Sources />
         ) : (
           <Library removed={view === 'removed'} onChanged={refresh} />
         )}
